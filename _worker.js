@@ -8,7 +8,7 @@ const ICONFONT_JS = '//at.alicdn.com/t/c/font_4973034_ehjc2dhuu76.js';
 // 网站图标和背景图片，可在环境变量中设置
 const DEFAULT_LOGO = 'https://i.imgur.com/sRUdl9C.png'; // 默认Logo图片，外置变量名为LOGO_URL
 const DEFAULT_BACKGROUND = 'https://i.imgur.com/5ptKfm7.jpeg'; // 默认背景图片，外置变量名为BACKGROUND_URL
-const DEFAULT_MOBILE_BACKGROUND = 'https://i.imgur.com/AiXrxKV.jpeg'; // 默认手机端背景图片，留空则使用桌面端背景图片，外置变量名为MOBILE_BACKGROUND_URL
+const DEFAULT_MOBILE_BACKGROUND = 'https://i.imgur.com/0OcJEts.jpeg'; // 默认手机端背景图片，留空则使用桌面端背景图片，外置变量名为MOBILE_BACKGROUND_URL
 
 // 登录密码设置
 const DEFAULT_TOKEN = ''; // 在此处设置默认密码，留空则使用'domain'，外置变量名为TOKEN
