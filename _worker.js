@@ -1,115 +1,26 @@
-/*
- * 域名监控系统 - Cloudflare Workers
- * 使用KV存储域名信息，支持Telegram通知
- * 功能：域名到期监控、自动通知、域名管理
- */
-
-// ================================
-// 配置常量区域
-// ================================
+/*域名监控系统 - Cloudflare Workers*/
+/*使用KV存储域名信息*/
 
 // iconfont阿里巴巴图标库
-const ICONFONT_CSS = '//at.alicdn.com/t/c/font_4973034_1qunj5fctpb.css';
-const ICONFONT_JS = '//at.alicdn.com/t/c/font_4973034_1qunj5fctpb.js';
+const ICONFONT_CSS = '//at.alicdn.com/t/c/font_4973034_ehjc2dhuu76.css';
+const ICONFONT_JS = '//at.alicdn.com/t/c/font_4973034_ehjc2dhuu76.js';
 
-// 网站图标和背景图片
-const DEFAULT_LOGO = 'https://cdn.jsdelivr.net/gh/kamanfaiz/CF-Domain-AutoCheck@main/img/logo.png'; // 默认logo，外置变量为LOGO_URL
-const DEFAULT_BACKGROUND = 'https://cdn.jsdelivr.net/gh/kamanfaiz/CF-Domain-AutoCheck@main/img/background.png'; // 默认背景，外置变量为BACKGROUND_URL
-const DEFAULT_MOBILE_BACKGROUND = 'https://cdn.jsdelivr.net/gh/kamanfaiz/CF-Domain-AutoCheck@main/img/mobile2.png'; // 默认移动端背景，外置变量为MOBILE_BACKGROUND_URL
+// 网站图标和背景图片，可在环境变量中设置
+const DEFAULT_LOGO = 'https://image.hyeri.us.kg/icon.png'; // 默认Logo图片，外置变量名为LOGO_URL
+const DEFAULT_BACKGROUND = 'https://image.hyeri.us.kg/bg.jpg'; // 默认背景图片，外置变量名为BACKGROUND_URL
+const DEFAULT_MOBILE_BACKGROUND = 'https://image.hyeri.us.kg/hyeri.jpg'; // 默认手机端背景图片，留空则使用桌面端背景图片，外置变量名为MOBILE_BACKGROUND_URL
 
 // 登录密码设置
-const DEFAULT_TOKEN = ''; // 默认密码，留空则使用'domain'，外置变量为TOKEN
+const DEFAULT_TOKEN = ''; // 在此处设置默认密码，留空则使用'domain'，外置变量名为TOKEN
 
 // Telegram通知配置
-const DEFAULT_TG_TOKEN = ''; // Telegram机器人Token，外置变量为TG_TOKEN
-const DEFAULT_TG_ID = '';    // Telegram聊天ID，外置变量为TG_ID
+const DEFAULT_TG_TOKEN = ''; // 你的Telegram机器人Token，留空则尝试读取环境变量中TG_TOKEN的值
+const DEFAULT_TG_ID = '';    // 你的Telegram聊天ID，留空则尝试读取环境变量中TG_ID的值
 
 // 网站标题配置
-const DEFAULT_SITE_NAME = ''; // 默认网站标题，外置变量为SITE_NAME
+const DEFAULT_SITE_NAME = ''; // 默认网站标题，外置环境变量名为SITE_NAME
 
-// WhoisJSON API配置
-const DEFAULT_WHOISJSON_API_KEY = ''; // WhoisJSON API密钥，外置变量为WHOISJSON_API_KEY
-
-// ================================
-// 工具函数区域
-// ================================
-
-// 格式化日期函数
-function formatDate(dateString) {
-  const date = new Date(dateString);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-// JSON响应工具函数
-function jsonResponse(data, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { 'Content-Type': 'application/json' }
-  });
-}
-
-// WhoisJSON API查询函数
-async function queryDomainWhois(domain) {
-  try {
-    // 获取API密钥，优先使用环境变量，否则使用默认值
-    const apiKey = typeof WHOISJSON_API_KEY !== 'undefined' ? WHOISJSON_API_KEY : DEFAULT_WHOISJSON_API_KEY;
-    
-    if (!apiKey) {
-      throw new Error('WhoisJSON API密钥未配置');
-    }
-
-    // 调用WhoisJSON API
-    const response = await fetch(`https://whoisjson.com/api/v1/whois?domain=${encodeURIComponent(domain)}`, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Token=${apiKey}`,
-        'Content-Type': 'application/json'
-      }
-    });
-
-    if (!response.ok) {
-      throw new Error(`API请求失败: ${response.status} ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    
-    // 解析并格式化返回数据
-    return {
-      success: true,
-      domain: data.name || domain,
-      registered: data.registered || false,
-      registrationDate: data.created ? formatDate(data.created) : null,
-      expiryDate: data.expires ? formatDate(data.expires) : null,
-      lastUpdated: data.changed ? formatDate(data.changed) : null,
-      registrar: data.registrar ? data.registrar.name : null,
-      registrarUrl: data.registrar ? data.registrar.url : null,
-      nameservers: data.nameserver || [],
-      status: data.status || [],
-      dnssec: data.dnssec || null,
-      raw: data // 保留原始数据以备后用
-    };
-  } catch (error) {
-    return {
-      success: false,
-      error: error.message,
-      domain: domain
-    };
-  }
-}
-
-// 检查KV是否已配置
-function isKVConfigured() {
-  return typeof DOMAIN_MONITOR !== 'undefined';
-}
-
-// ================================
-// HTML模板区域
-// ================================
-
-// 登录页面模板
+// 登录页HTML模板
 const getLoginHTML = (title) => `
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -278,9 +189,6 @@ const getLoginHTML = (title) => `
     </style>
 </head>
 <body>
-    <a href="https://github.com/kamanfaiz/CF-Domain-Autocheck" target="_blank" class="github-corner" title="GitHub Repository">
-        <i class="iconfont icon-github1"></i>
-    </a>
     <div class="login-container">
         <div style="display: flex; flex-direction: column; align-items: center; width: 100%;">
             <h2 class="login-title">
@@ -320,6 +228,7 @@ const getLoginHTML = (title) => `
                 }
             })
             .catch(error => {
+                console.error('登录请求失败:', error);
                 document.getElementById('errorMessage').style.display = 'block';
             });
         });
@@ -328,7 +237,7 @@ const getLoginHTML = (title) => `
 </html>
 `;
 
-// 主界面模板
+// HTML模板
 const getHTMLContent = (title) => `
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -734,17 +643,6 @@ const getHTMLContent = (title) => `
             margin-bottom: 4px; /* 分类之间的间距 */
         }
         
-        /* 主容器底部间距统一 */
-        .container {
-            margin-bottom: 60px; /* 统一设置与页脚的间距 */
-        }
-        
-        /* 空状态容器间距 - 桌面端 */
-        .empty-state-container {
-            margin-top: 2px !important; /* 与分类标题和卡片的间距保持一致 */
-            margin-bottom: 0 !important; /* 确保空状态容器底部间距与其他状态一致 */
-        }
-        
         /* 确保分类标题与卡片左对齐 */
         .col-12.px-1-5 {
             padding-left: 0.375rem !important; /* 与卡片列相同的左内边距 */
@@ -763,24 +661,11 @@ const getHTMLContent = (title) => `
             margin: 0;
             padding: 0;
             color: white;
-            font-size: 1.3rem;
-            font-weight: 600;
+            font-size: 1.8rem;
+            font-weight: 700;
             text-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
             display: flex;
             align-items: center;
-        }
-
-        /* 毛玻璃风格的统计徽章 */
-        .count-badge {
-            background: rgba(255, 255, 255, 0.15);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            backdrop-filter: blur(10px);
-            color: rgba(255, 255, 255, 0.9);
-            padding: 0.25rem 0.5rem;
-            border-radius: 0.375rem;
-            font-size: 0.875rem;
-            font-weight: 500;
-            margin-left: 0.5rem;
         }
         
         /* 状态区域 */
@@ -942,23 +827,22 @@ const getHTMLContent = (title) => `
         .progress-circle-container {
             display: flex;
             justify-content: flex-end;
-            align-items: flex-start; /* 改为顶部对齐，确保右上角固定 */
+            align-items: center;
             padding-right: 10px;
-            padding-top: 5px; /* 添加顶部间距保持位置 */
             box-sizing: border-box;
             overflow: visible;
             position: absolute;
             right: 0;
-            top: 0; /* 改为顶部对齐 */
-            transform: none; /* 移除垂直居中变换 */
+            top: 35%; /* 进度条向上移动 */
+            transform: translateY(-50%);
             z-index: 10; /* 提高z-index值确保在文本上方 */
-            min-width: 90px; /* 再次增加最小宽度适应更大的圆圈 */
+            min-width: 65px;
         }
         
         .progress-circle {
             position: relative;
-            width: 85px; /* 再次增加宽度 */
-            height: 85px; /* 再次增加高度 */
+            width: 65px;
+            height: 65px;
             margin: 0;
             box-sizing: border-box;
             overflow: visible;
@@ -1020,7 +904,7 @@ const getHTMLContent = (title) => `
         
         /* 进度条百分比文字样式 */
         .progress-percent-text {
-            font-size: 18px; /* 再次增加字体大小以适应更大的圆圈 */
+            font-size: 14px;
             font-weight: bold;
             color: #ffffff;
             text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
@@ -1211,17 +1095,6 @@ const getHTMLContent = (title) => `
             background-color:rgb(24, 216, 120) !important; /* 深绿色 */
             border-color:rgba(38, 190, 114, 0.8) !important;
         }
-
-        /* 分类管理按钮样式，与添加域名按钮保持一致 */
-        .category-manage-btn {
-            background-color:rgb(42, 175, 86) !important; /* 绿色 */
-            border-color:rgba(33, 148, 72, 0.8) !important;
-        }
-
-        .category-manage-btn:hover {
-            background-color:rgb(24, 216, 120) !important; /* 深绿色 */
-            border-color:rgba(38, 190, 114, 0.8) !important;
-        }
         
         /* 排序按钮自定义样式 */
         .sort-btn {
@@ -1232,9 +1105,8 @@ const getHTMLContent = (title) => `
         .sort-btn:hover {
             background-color: rgb(0, 162, 255) !important; /* 蓝色 */
             border-color: rgba(23, 137, 202, 0.8) !important;
+            
         }
-        
-
         
         /* 排序选项的勾选图标样式 */
         .sort-check {
@@ -1270,85 +1142,6 @@ const getHTMLContent = (title) => `
         /* 按钮中的图标特殊样式 */
         .btn-action .iconfont {
             font-size: 0.9rem;
-        }
-        
-        /* WHOIS查询按钮样式 */
-        .whois-query-btn {
-            color: white !important;
-            background-color: #0d6efd !important;
-            border-color: #0d6efd !important;
-        }
-        
-        .whois-query-btn:hover {
-            color: white !important;
-            background-color: #0b5ed7 !important;
-            border-color: #0a58ca !important;
-        }
-        
-        .whois-query-btn:focus,
-        .whois-query-btn:active {
-            color: white !important;
-            background-color: #0a58ca !important;
-            border-color: #0a53be !important;
-            box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25) !important;
-        }
-        
-        .whois-query-btn:disabled {
-            color: white !important;
-            background-color: #6c757d !important;
-            border-color: #6c757d !important;
-        }
-        
-        /* 确保WHOIS查询按钮中的图标也是白色 */
-        .whois-query-btn .iconfont {
-            color: white !important;
-        }
-        
-        .whois-query-btn:hover .iconfont,
-        .whois-query-btn:focus .iconfont,
-        .whois-query-btn:active .iconfont,
-        .whois-query-btn:disabled .iconfont {
-            color: white !important;
-        }
-        
-        /* WHOIS清除按钮样式 */
-        .whois-clear-btn {
-            color: white !important;
-            background-color: #dc3545 !important;
-            border-color: #dc3545 !important;
-        }
-        
-        .whois-clear-btn:hover {
-            color: white !important;
-            background-color: #c82333 !important;
-            border-color: #bd2130 !important;
-        }
-        
-        .whois-clear-btn:focus,
-        .whois-clear-btn:active {
-            color: white !important;
-            background-color: #bd2130 !important;
-            border-color: #b21f2d !important;
-            box-shadow: 0 0 0 0.25rem rgba(220, 53, 69, 0.25) !important;
-        }
-        
-        .whois-clear-btn:disabled {
-            color: white !important;
-            background-color: #dc3545 !important;
-            border-color: #dc3545 !important;
-            opacity: 0.65;
-        }
-        
-        /* 确保WHOIS清除按钮中的图标也是白色 */
-        .whois-clear-btn .iconfont {
-            color: white !important;
-        }
-        
-        .whois-clear-btn:hover .iconfont,
-        .whois-clear-btn:focus .iconfont,
-        .whois-clear-btn:active .iconfont,
-        .whois-clear-btn:disabled .iconfont {
-            color: white !important;
         }
         
         /* 表单和模态框中的图标统一样式 */
@@ -1566,7 +1359,6 @@ const getHTMLContent = (title) => `
             background-color: rgba(255, 255, 255, 0.15);
             backdrop-filter: blur(15px);
             -webkit-backdrop-filter: blur(15px);
-            overflow: hidden; /* 确保内部元素不会超出圆角边界 */
         }
         
         .modal-header {
@@ -1575,15 +1367,11 @@ const getHTMLContent = (title) => `
             padding: 15px 20px;
             color: white;
             text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-            border-top-left-radius: 16px;
-            border-top-right-radius: 16px;
         }
         
         .modal-footer {
             border-top: 1px solid rgba(255, 255, 255, 0.18);
             padding: 15px 20px;
-            border-bottom-left-radius: 16px;
-            border-bottom-right-radius: 16px;
             background-color: rgba(255, 255, 255, 0.05);
         }
         
@@ -1671,26 +1459,6 @@ const getHTMLContent = (title) => `
             color: rgba(255, 255, 255, 0.7);
         }
         
-        /* 自动填充高亮样式 */
-        .form-control.auto-filled,
-        .form-select.auto-filled {
-            background-color: rgba(74, 222, 128, 0.15) !important;
-            border-color: rgba(74, 222, 128, 0.6) !important;
-            box-shadow: 0 0 0 0.2rem rgba(74, 222, 128, 0.25) !important;
-            animation: autoFillGlow 2s ease-in-out;
-        }
-        
-        @keyframes autoFillGlow {
-            0% {
-                background-color: rgba(74, 222, 128, 0.3);
-                box-shadow: 0 0 0 0.3rem rgba(74, 222, 128, 0.4);
-            }
-            100% {
-                background-color: rgba(74, 222, 128, 0.15);
-                box-shadow: 0 0 0 0.2rem rgba(74, 222, 128, 0.25);
-            }
-        }
-        
         .form-select {
             background-color: rgba(255, 255, 255, 0.2);
             border: 1px solid rgba(255, 255, 255, 0.3);
@@ -1763,66 +1531,6 @@ const getHTMLContent = (title) => `
                 display: flex;
                 justify-content: flex-end;
             }
-            
-            /* 移动端导航栏按钮只显示图标，隐藏文字 */
-            .btn-action span {
-                display: none !important;
-            }
-            
-            /* 移动端WHOIS按钮只显示图标，但保持和输入框的整体性 */
-            .whois-query-btn span,
-            .whois-clear-btn span {
-                display: none !important;
-            }
-            
-            .whois-query-btn,
-            .whois-clear-btn {
-                display: flex !important;
-                align-items: center !important;
-                justify-content: center !important;
-                padding: 0.375rem 0.75rem !important;
-                min-width: 44px !important;
-            }
-            
-            .whois-query-btn .iconfont,
-            .whois-clear-btn .iconfont {
-                font-size: 1.1rem !important;
-                line-height: 1 !important;
-                margin: 0 !important;
-            }
-            
-            .view-text {
-                display: none !important;
-            }
-            
-            /* 移动端空状态容器间距调整 - 只影响空状态提示框 */
-            .empty-state-container {
-                margin-top: 2px !important; /* 与分类标题和卡片的间距保持一致 */
-                margin-bottom: 0 !important; /* 确保空状态容器底部间距与其他状态一致 */
-            }
-            
-            /* 移动端空状态提示框内容居中优化 */
-            .empty-state-container .py-3 {
-                height: 140px !important;
-                padding: 0.5rem !important;
-            }
-            
-            /* 调整按钮间距和大小 */
-            .btn-action {
-                min-width: 40px;
-                padding: 8px 10px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-            }
-            
-            /* 确保按钮内的图标居中 */
-            .btn-action .iconfont {
-                margin: 0 !important;
-                line-height: 1;
-            }
-            
-
         }
     </style>
 </head>
@@ -1849,7 +1557,7 @@ const getHTMLContent = (title) => `
         
         <!-- 页面标题和操作按钮 -->
         <div class="page-header">
-            <h1 class="page-title"><i class="iconfont icon-list-ul"></i> 域名列表 <span class="count-badge" id="totalDomainCount">(0)</span></h1>
+            <h1 class="page-title"><i class="iconfont icon-list-ul"></i> 域名列表</h1>
             <div class="btn-action-group">
                                   <div class="btn-group me-2">
                       <button class="btn btn-outline-info btn-action view-option" data-view="collapse-all" type="button" style="transition: background-color 0.2s, color 0.2s;">
@@ -1859,14 +1567,11 @@ const getHTMLContent = (title) => `
                          <i class="iconfont icon-quanjufangda"></i> <span class="view-text">展开</span>
                       </button>
                   </div>
-                <button class="btn btn-success btn-action category-manage-btn" data-bs-toggle="modal" data-bs-target="#categoryManageModal">
-                    <i class="iconfont icon-fenlei" style="color: white;"></i> <span style="color: white;">分类管理</span>
-                </button>
-                <button class="btn btn-success btn-action add-domain-btn" data-bs-toggle="modal" data-bs-target="#addDomainModal">
+                <button class="btn btn-primary btn-action add-domain-btn" data-bs-toggle="modal" data-bs-target="#addDomainModal">
                     <i class="iconfont icon-jia" style="color: white;"></i> <span style="color: white;">添加域名</span>
                 </button>
                 <div class="dropdown">
-                    <button class="btn btn-danger btn-action sort-btn" type="button" id="sortDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+                    <button class="btn btn-danger dropdown-toggle btn-action sort-btn" type="button" id="sortDropdown" data-bs-toggle="dropdown" aria-expanded="false">
                         <i class="iconfont icon-paixu" style="color: white;"></i> <span style="color: white;">域名排序</span>
                     </button>
                     <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="sortDropdown">
@@ -1895,7 +1600,7 @@ const getHTMLContent = (title) => `
     </div>
     
     <!-- 添加域名模态框 -->
-    <div class="modal fade" id="addDomainModal" tabindex="-1">
+    <div class="modal fade" id="addDomainModal" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
@@ -1906,34 +1611,17 @@ const getHTMLContent = (title) => `
                     <form id="addDomainForm">
                         <input type="hidden" id="domainId" value="">
                         <div class="mb-3">
-                            <label for="domainName" class="form-label"><i class="iconfont icon-earth-full"></i> 域名 <span style="color: red;">*</span></label>
-                            <div class="input-group">
-                                <input type="text" class="form-control" id="domainName" placeholder="请输入域名，如example.com" required>
-                                <button class="btn btn-outline-primary whois-query-btn" type="button" id="whoisQueryBtn">
-                                    <i class="iconfont icon-magnifying-glass"></i><span> 查询</span>
-                                </button>
-                                <button class="btn btn-outline-danger whois-clear-btn" type="button" id="whoisClearBtn" title="清除自动填充的信息">
-                                    <i class="iconfont icon-qingchu"></i><span> 清除</span>
-                                </button>
-                            </div>
-                            <div class="form-text">输入域名后点击"查询"可自动填充注册信息</div>
-                            <div id="whoisQueryStatus" class="mt-2" style="display: none;"></div>
+                            <label for="domainName" class="form-label"><i class="iconfont icon-earth-full"></i> 域名(必填)</label>
+                            <input type="text" class="form-control" id="domainName" placeholder="请输入域名，如example.com" required>
                         </div>
                         <div class="mb-3">
-                            <label for="registrar" class="form-label"><i class="iconfont icon-house-chimney"></i> 注册厂商</label>
-                            <input type="text" class="form-control" id="registrar" placeholder="请输入注册厂商名称，如阿里云、腾讯云等">
-                        </div>
-                        <div class="mb-3">
-                            <label for="domainCategory" class="form-label"><i class="iconfont icon-fenlei"></i> 分类</label>
-                            <select class="form-select" id="domainCategory">
-                                <option value="">选择分类</option>
-                                <!-- 分类选项将通过JavaScript动态生成 -->
-                            </select>
-                            <small class="form-text">不选择将放入默认分类</small>
+                            <label for="registrar" class="form-label"><i class="iconfont icon-house-chimney"></i> 注册商(可选)</label>
+                            <input type="text" class="form-control" id="registrar" placeholder="请输入注册商名称，如阿里云、腾讯云等">
+                            <div class="form-text">将用做分类标准，不填则归入默认分类</div>
                         </div>
                         <!-- 添加自定义备注字段 -->
                         <div class="mb-3">
-                            <label for="customNote" class="form-label"><i class="iconfont icon-tags"></i> 自定义备注</label>
+                            <label for="customNote" class="form-label"><i class="iconfont icon-tags"></i> 自定义备注(可选)</label>
                             <div class="input-group">
                                 <input type="text" class="form-control" id="customNote" placeholder="添加备注信息">
                                 <select class="form-select" id="noteColor" style="max-width: 120px;">
@@ -1953,14 +1641,14 @@ const getHTMLContent = (title) => `
                             </div>
                         </div>
                         <div class="mb-3">
-                            <label for="registrationDate" class="form-label"><i class="iconfont icon-calendar-days"></i> 注册时间 <span style="color: red;">*</span></label>
+                            <label for="registrationDate" class="form-label"><i class="iconfont icon-calendar-days"></i> 注册时间(必填)</label>
                             <input type="date" class="form-control" id="registrationDate" required>
                             <div class="form-text">域名首次注册的时间</div>
                         </div>
                         
                         <!-- 续期周期设置 -->
                         <div class="mb-3">
-                            <label for="renewCycle" class="form-label"><i class="iconfont icon-repeat"></i> 续期周期 <span style="color: red;">*</span></label>
+                            <label for="renewCycle" class="form-label"><i class="iconfont icon-repeat"></i> 续期周期(必填)</label>
                             <div class="input-group">
                                 <input type="number" class="form-control" id="renewCycleValue" value="1" min="1" max="100">
                                 <select class="form-select" id="renewCycleUnit">
@@ -1973,14 +1661,14 @@ const getHTMLContent = (title) => `
                         </div>
                         
                         <div class="mb-3">
-                            <label for="expiryDate" class="form-label"><i class="iconfont icon-calendar-days"></i> 到期日期 <span style="color: red;">*</span></label>
+                            <label for="expiryDate" class="form-label"><i class="iconfont icon-calendar-days"></i> 到期日期(必填)</label>
                             <input type="date" class="form-control" id="expiryDate" required>
                             <div class="form-text text-info">根据注册时间和续期周期自动计算，可手动调整</div>
                         </div>
                         
                         <!-- 价格设置 -->
                         <div class="mb-3">
-                            <label for="price" class="form-label"><i class="iconfont icon-licai"></i> 价格</label>
+                            <label for="price" class="form-label"><i class="iconfont icon-licai"></i> 价格(可选)</label>
                             <div class="input-group">
                                 <select class="form-select" id="priceCurrency" style="max-width: 80px;">
                                     <option value="¥" selected>¥</option>
@@ -2001,7 +1689,7 @@ const getHTMLContent = (title) => `
                         
                         <!-- 添加续费链接字段 -->
                         <div class="mb-3">
-                            <label for="renewLink" class="form-label"><i class="iconfont icon-link"></i> 续费链接</label>
+                            <label for="renewLink" class="form-label"><i class="iconfont icon-link"></i> 续费链接(可选)</label>
                             <input type="url" class="form-control" id="renewLink" placeholder="https://example.com/renew">
                             <div class="form-text">域名续费的直达链接</div>
                         </div>
@@ -2044,51 +1732,8 @@ const getHTMLContent = (title) => `
         </div>
     </div>
     
-    <!-- 分类管理模态框 -->
-    <div class="modal fade" id="categoryManageModal" tabindex="-1">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">分类管理</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body">
-                    <form id="categoryForm">
-
-                        <div class="mb-3">
-                            <label for="categoryName" class="form-label"><i class="iconfont icon-shapes"></i> 分类名称 <span style="color: red;">*</span></label>
-                            <input type="text" class="form-control" id="categoryName" placeholder="例如: 生产环境" maxlength="50" required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="categoryDescription" class="form-label"><i class="iconfont icon-bianji"></i> 描述</label>
-                            <input type="text" class="form-control" id="categoryDescription" placeholder="分类描述" maxlength="100">
-                        </div>
-                        <div class="mb-3">
-                            <button type="button" class="btn btn-primary" id="addCategoryBtn">
-                                <i class="iconfont icon-jia" style="color: white;"></i> <span style="color: white;">添加分类</span>
-                            </button>
-                        </div>
-                        
-                        <hr class="my-4">
-                        
-                        <h6 class="mb-3" style="display: flex; align-items: center; gap: 5px;"><i class="iconfont icon-list-ul" style="color: white;"></i> 现有分类</h6>
-                        <div id="categoryList">
-                            <!-- 分类列表将通过JavaScript动态生成 -->
-                            <div class="text-center p-3 text-muted">
-                                <i class="iconfont icon-loading"></i> 加载中...
-                            </div>
-                        </div>
-                    </form>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal"><span style="color: white;"><i class="iconfont icon-xmark"></i> 关闭</span></button>
-                </div>
-            </div>
-        </div>
-    </div>
-    
     <!-- 设置模态框 -->
-    <div class="modal fade" id="settingsModal" tabindex="-1">
+    <div class="modal fade" id="settingsModal" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
@@ -2134,7 +1779,7 @@ const getHTMLContent = (title) => `
     </div>
     
     <!-- 确认删除模态框 -->
-    <div class="modal fade" id="deleteDomainModal" tabindex="-1">
+    <div class="modal fade" id="deleteDomainModal" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
@@ -2153,7 +1798,7 @@ const getHTMLContent = (title) => `
     </div>
     
     <!-- 续期模态框 -->
-    <div class="modal fade" id="renewDomainModal" tabindex="-1">
+    <div class="modal fade" id="renewDomainModal" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
@@ -2185,33 +1830,6 @@ const getHTMLContent = (title) => `
             </div>
         </div>
     </div>
-    
-    <!-- 确认删除分类模态框 -->
-    <div class="modal fade" id="deleteCategoryModal" tabindex="-1">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">删除分类</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body">
-                    <p>确定要删除分类 <strong id="deleteCategoryModalName"></strong> 吗？</p>
-                    <p class="text-warning">该分类下的域名将自动移动到默认分类中。此操作不可撤销。</p>
-                    
-                    <div class="form-check mt-3">
-                        <input class="form-check-input" type="checkbox" id="confirmDeleteCheckbox">
-                        <label class="form-check-label" for="confirmDeleteCheckbox">
-                            我确认要删除此分类
-                        </label>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal"><span style="color: white;"><i class="iconfont icon-xmark"></i> 取消</span></button>
-                    <button type="button" class="btn btn-danger" id="confirmDeleteCategoryBtn" disabled><span style="color: white;"><i class="iconfont icon-shanchu"></i> 删除</span></button>
-                </div>
-            </div>
-        </div>
-    </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <!-- 已在头部引入iconfont图标库，此处无需重复引入 -->
@@ -2219,7 +1837,6 @@ const getHTMLContent = (title) => `
         // 全局变量
         let domains = [];
         let currentDomainId = null;
-        let currentCategoryId = null;
         let telegramConfig = {};
         let currentSortField = 'suffix'; // 默认排序字段改为域名后缀
         let currentSortOrder = 'asc'; // 默认排序顺序
@@ -2251,15 +1868,6 @@ const getHTMLContent = (title) => `
           return result;
         }
         
-        // 格式化日期函数
-        function formatDate(dateString) {
-            const date = new Date(dateString);
-            const year = date.getFullYear();
-            const month = String(date.getMonth() + 1).padStart(2, '0');
-            const day = String(date.getDate()).padStart(2, '0');
-            return year + '-' + month + '-' + day;
-        }
-        
         // 页面加载完成后执行
         document.addEventListener('DOMContentLoaded', () => {
             // 设置事件监听器
@@ -2268,8 +1876,8 @@ const getHTMLContent = (title) => `
             // 确保DOM元素已完全加载
             setTimeout(() => {
                 // 使用Promise.all并行加载数据
-                Promise.all([loadDomains(), loadCategories(), loadTelegramConfig()])
-                    .catch(error => showAlert('danger', '数据加载失败: ' + error.message));
+                Promise.all([loadDomains(), loadTelegramConfig()])
+                    .catch(error => console.error('数据加载错误:', error));
             }, 300);
             
             // 设置初始视图模式为全部折叠
@@ -2281,9 +1889,6 @@ const getHTMLContent = (title) => `
                 }
             }, 500); // 延迟执行确保DOM已经加载完成
         });
-        
-        // 全局变量用于存储当前查询的控制器
-        let currentWhoisController = null;
         
         // 设置事件监听器
         function setupEventListeners() {
@@ -2305,75 +1910,12 @@ const getHTMLContent = (title) => `
             // 确认删除按钮
             document.getElementById('confirmDeleteBtn').addEventListener('click', deleteDomain);
             
-            // 分类管理相关事件
-            const addCategoryBtn = document.getElementById('addCategoryBtn');
-            if (addCategoryBtn) {
-                addCategoryBtn.addEventListener('click', addCategory);
-            }
-            
-            // 分类管理模态框显示时加载分类列表
-            const categoryModal = document.getElementById('categoryManageModal');
-            if (categoryModal) {
-                categoryModal.addEventListener('shown.bs.modal', function() {
-                    loadCategories();
-                });
-            }
-            
             // 确认续期按钮
             document.getElementById('confirmRenewBtn').addEventListener('click', renewDomain);
-            
-            // 确认删除分类按钮
-            document.getElementById('confirmDeleteCategoryBtn').addEventListener('click', confirmDeleteCategory);
-            
-            // 删除分类确认勾选框
-            document.getElementById('confirmDeleteCheckbox').addEventListener('change', function() {
-                const deleteBtn = document.getElementById('confirmDeleteCategoryBtn');
-                deleteBtn.disabled = !this.checked;
-            });
             
             // 添加域名按钮点击事件 - 清空表单
             document.querySelector('.add-domain-btn').addEventListener('click', function() {
                 resetForm(); // 重置表单，确保显示空白表单
-            });
-            
-            // 监听模态框关闭事件，取消正在进行的查询
-            document.getElementById('addDomainModal').addEventListener('hidden.bs.modal', function() {
-                if (currentWhoisController) {
-                    currentWhoisController.abort();
-                    currentWhoisController = null;
-                }
-                // 清除自动填充的高亮样式
-                document.getElementById('registrar').classList.remove('auto-filled');
-                document.getElementById('registrationDate').classList.remove('auto-filled');
-                document.getElementById('expiryDate').classList.remove('auto-filled');
-                document.getElementById('renewCycleValue').classList.remove('auto-filled');
-                document.getElementById('renewCycleUnit').classList.remove('auto-filled');
-            });
-            
-            // 添加模态框焦点管理 - 让Bootstrap自己处理aria-hidden
-            const modals = ['addDomainModal', 'categoryManageModal', 'settingsModal', 'deleteDomainModal', 'renewDomainModal', 'deleteCategoryModal'];
-            modals.forEach(modalId => {
-                const modalElement = document.getElementById(modalId);
-                if (modalElement) {
-                    // 模态框显示时确保焦点陷阱正确工作
-                    modalElement.addEventListener('shown.bs.modal', function() {
-                        // 将焦点设置到模态框的第一个可聚焦元素
-                        const firstFocusable = this.querySelector('input:not([disabled]):not([aria-hidden="true"]), button:not([disabled]):not([aria-hidden="true"]), select:not([disabled]):not([aria-hidden="true"]), textarea:not([disabled]):not([aria-hidden="true"]), [tabindex]:not([tabindex="-1"]):not([aria-hidden="true"])');
-                        if (firstFocusable) {
-                            setTimeout(() => {
-                                firstFocusable.focus();
-                            }, 150);
-                        }
-                    });
-                    
-                    // 确保模态框内的元素在隐藏时不会获得焦点
-                    modalElement.addEventListener('hide.bs.modal', function() {
-                        // 移除可能残留的焦点
-                        if (document.activeElement && this.contains(document.activeElement)) {
-                            document.activeElement.blur();
-                        }
-                    });
-                }
             });
             
             // 清除上次续期时间按钮
@@ -2384,76 +1926,6 @@ const getHTMLContent = (title) => `
                 
                 // 清除上次续期时间后，重新根据注册时间和续期周期计算到期日期
                 calculateExpiryDate();
-            });
-            
-            // WHOIS自动查询按钮
-            document.getElementById('whoisQueryBtn').addEventListener('click', async function() {
-                const domainInput = document.getElementById('domainName');
-                const domain = domainInput.value.trim();
-                
-                if (!domain) {
-                    showWhoisStatus('请先输入域名', 'danger');
-                    return;
-                }
-                
-                // 验证域名格式 - 更宽松的域名格式验证
-                const domainRegex = /^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.[a-zA-Z]{2,}$/;
-                if (!domainRegex.test(domain)) {
-                    showWhoisStatus('仅支持自动查询一级域名', 'danger');
-                    return;
-                }
-                
-                // 验证是否为一级域名（只能有一个点）
-                const dotCount = domain.split('.').length - 1;
-                
-                if (dotCount !== 1) {
-                    if (dotCount === 0) {
-                        showWhoisStatus('请输入完整的域名（如：example.com）', 'danger');
-                    } else {
-                        showWhoisStatus('只能查询一级域名，不支持二级域名查询（检测到' + dotCount + '个点）', 'danger');
-                    }
-                    return;
-                }
-                
-                // 取消之前的查询
-                if (currentWhoisController) {
-                    currentWhoisController.abort();
-                }
-                
-                // 创建新的查询控制器
-                currentWhoisController = new AbortController();
-                
-                await performWhoisQuery(domain, currentWhoisController);
-            });
-            
-            // WHOIS清除按钮
-            document.getElementById('whoisClearBtn').addEventListener('click', function() {
-                // 清除域名输入框
-                document.getElementById('domainName').value = '';
-                
-                // 清除自动填充的字段
-                document.getElementById('registrar').value = '';
-                document.getElementById('registrationDate').value = '';
-                document.getElementById('expiryDate').value = '';
-                document.getElementById('renewCycleValue').value = '1';
-                document.getElementById('renewCycleUnit').value = 'year';
-                
-                // 清除高亮样式
-                document.getElementById('registrar').classList.remove('auto-filled');
-                document.getElementById('registrationDate').classList.remove('auto-filled');
-                document.getElementById('expiryDate').classList.remove('auto-filled');
-                document.getElementById('renewCycleValue').classList.remove('auto-filled');
-                document.getElementById('renewCycleUnit').classList.remove('auto-filled');
-                
-                // 清除查询状态信息
-                const statusDiv = document.getElementById('whoisQueryStatus');
-                if (statusDiv) {
-                    statusDiv.style.display = 'none';
-                    statusDiv.innerHTML = '';
-                }
-                
-                // 显示清除成功提示
-                showWhoisStatus('已清除自动填充的域名信息', 'info');
             });
             
             // 续期值或单位变化时更新新到期日期
@@ -2479,27 +1951,6 @@ const getHTMLContent = (title) => `
             // 域名通知设置 - 全局/自定义切换
             document.getElementById('useGlobalSettings').addEventListener('change', function() {
                 document.getElementById('domainNotifySettings').style.display = this.checked ? 'none' : 'block';
-            });
-            
-            // 窗口大小变化监听器 - 用于移动端排序修复
-            let resizeTimer;
-            let lastWidth = window.innerWidth;
-            
-            window.addEventListener('resize', function() {
-                // 防抖处理，避免频繁重新渲染
-                clearTimeout(resizeTimer);
-                resizeTimer = setTimeout(function() {
-                    const currentWidth = window.innerWidth;
-                    
-                    // 只有在宽度发生显著变化时才重新渲染（避免移动端滑动时地址栏显示/隐藏导致的高度变化）
-                    const widthChanged = Math.abs(currentWidth - lastWidth) > 50;
-                    
-                    if (widthChanged) {
-                        // 重新渲染域名列表以适应新的屏幕尺寸
-                        renderDomainList();
-                        lastWidth = currentWidth;
-                    }
-                }, 300); // 增加延迟时间，减少触发频率
             });
             
             // 根据注册时间和续期周期自动计算到期日期
@@ -2548,11 +1999,11 @@ const getHTMLContent = (title) => `
             
             // 排序选项点击事件
             document.querySelectorAll('.sort-option').forEach(option => {
-                option.addEventListener('click', async function(e) {
+                option.addEventListener('click', function(e) {
                     e.preventDefault();
                     currentSortField = this.dataset.sort;
                     currentSortOrder = this.dataset.order;
-                    await renderDomainList();
+                    renderDomainList();
                     
                                 // 不再更新排序按钮文本，只保留"域名排序"
             // 但仍然需要更新勾选状态
@@ -2709,7 +2160,7 @@ const getHTMLContent = (title) => `
             }
             
             // 表头排序点击事件
-            document.addEventListener('click', async function(e) {
+            document.addEventListener('click', function(e) {
                 if (e.target.tagName === 'TH') {
                     const field = e.target.dataset.sort;
                     if (field) {
@@ -2720,7 +2171,7 @@ const getHTMLContent = (title) => `
                             currentSortField = field;
                             currentSortOrder = 'asc';
                         }
-                        await renderDomainList();
+                        renderDomainList();
                     }
                 }
             });
@@ -2765,6 +2216,7 @@ const getHTMLContent = (title) => `
             try {
                 showDomainLoadingState();
             } catch (loadingError) {
+                console.error('显示加载状态失败:', loadingError);
                 // 继续执行，不要因为显示加载状态失败而中断
             }
             
@@ -2772,20 +2224,23 @@ const getHTMLContent = (title) => `
                 const response = await fetch('/api/domains');
                 
                 if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('API响应错误:', response.status, errorText);
                     throw new Error('获取域名列表失败: ' + response.status);
                 }
                 
                 domains = await response.json();
                 
                 // 确保DOM元素已加载后再渲染
-                setTimeout(async () => {
-                    await renderDomainList();
+                setTimeout(() => {
+                    renderDomainList();
                 }, 100);
                 
                 return domains; // 返回加载的域名数据
             } catch (error) {
+                console.error('加载域名数据失败:', error);
                 showAlert('danger', '加载域名列表失败: ' + error.message);
-                throw error;
+                throw error; // 重新抛出错误以便Promise.all可以捕获
             }
         }
         
@@ -2814,7 +2269,7 @@ const getHTMLContent = (title) => `
                         generateSkeletonCard() +
                     '</div>';
             } catch (error) {
-                // 忽略骨架屏设置失败
+                console.error('设置骨架屏失败:', error);
             }
         }
         
@@ -2872,7 +2327,7 @@ const getHTMLContent = (title) => `
                     document.getElementById('telegramToken').disabled = false;
                 }
             } catch (error) {
-                // 忽略Telegram配置加载失败
+                console.error('加载Telegram配置失败:', error);
             }
         }
         
@@ -2942,13 +2397,7 @@ const getHTMLContent = (title) => `
         }
         
         // 渲染域名列表
-        async function renderDomainList() {
-            // 更新总域名数量统计
-            const totalDomainCountElement = document.getElementById('totalDomainCount');
-            if (totalDomainCountElement) {
-                totalDomainCountElement.textContent = '(' + domains.length + ')';
-            }
-            
+        function renderDomainList() {
             // 获取domainListContainer
             const domainListContainer = document.getElementById('domainListContainer');
             if (!domainListContainer) {
@@ -2977,72 +2426,30 @@ const getHTMLContent = (title) => `
             // 按照指定字段和顺序排序
             sortDomains(domains, currentSortField, currentSortOrder);
             
-            // 获取分类数据
-            let categoryList = [];
-            try {
-                const response = await fetch('/api/categories');
-                if (response.ok) {
-                    categoryList = await response.json();
-                    // 同步到全局变量
-                    categories = categoryList;
-                }
-            } catch (error) {
-                // 如果获取分类失败，创建默认分类
-                categoryList = [{
-                    id: 'default',
-                    name: '默认分类',
-                    description: '未指定分类的域名',
-                    order: 0,
-                    isDefault: true
-                }];
-                // 同步到全局变量
-                categories = categoryList;
-            }
-                
-                // 按分类分组域名
+                // 按注册商分组域名
     const domainGroups = {};
     
-    // 初始化所有分类组
-    categoryList.forEach(category => {
-        domainGroups[category.id] = {
-            id: category.id,  // 添加ID字段
-            name: category.name,
-            description: category.description,
-            domains: [],
-            order: category.order,
-            isDefault: category.isDefault
-        };
-    });
+    // 创建默认分类
+    domainGroups['默认分类'] = [];
     
     // 将域名分配到不同的分组
     domains.forEach(domain => {
-        // 确保向后兼容：如果域名没有categoryId，根据是否有注册商信息决定分类
-        if (!domain.categoryId) {
-            if (domain.registrar && domain.registrar.trim() !== '') {
-                // 如果有注册商但没有分类，先保持原有的注册商分组逻辑，但标记为需要迁移
-                domain.categoryId = 'default';
-            } else {
-                // 没有注册商信息的域名放入默认分类
-                domain.categoryId = 'default';
+        if (domain.registrar && domain.registrar.trim() !== '') {
+            // 如果有注册商信息，添加到对应分组
+            if (!domainGroups[domain.registrar]) {
+                domainGroups[domain.registrar] = [];
             }
-        }
-        
-        // 将域名添加到对应分类，如果分类不存在则放入默认分类
-        const categoryId = domain.categoryId || 'default';
-        if (domainGroups[categoryId]) {
-            domainGroups[categoryId].domains.push(domain);
+            domainGroups[domain.registrar].push(domain);
         } else {
-            domainGroups['default'].domains.push(domain);
+            // 没有注册商信息的域名放入默认分类
+            domainGroups['默认分类'].push(domain);
         }
     });
             
             // 处理域名分组
-            const renderGroup = (categoryData) => {
-                // 如果该分组没有域名，跳过（但默认分类有域名时才显示）
-                if (categoryData.domains.length === 0 && categoryData.isDefault) return;
-                
-                const groupName = categoryData.name;
-                const groupDomains = categoryData.domains;
+            const renderGroup = (groupName, groupDomains) => {
+                // 如果该分组没有域名，跳过
+                if (groupDomains.length === 0) return;
                 
                 // 创建分类容器，用于包含标题和卡片
                 const groupContainer = document.createElement('div');
@@ -3055,7 +2462,7 @@ const getHTMLContent = (title) => `
                 categoryRow.innerHTML = 
                     '<div class="col-12 px-1-5">' + /* 添加与卡片列相同的内边距类 */
                         '<div class="category-header">' +
-                            '<h5 class="category-title">' + groupName + ' <span class="count-badge">(' + groupDomains.length + ')</span></h5>' +
+                            '<h5 class="category-title">' + groupName + '</h5>' +
                         '</div>' +
                     '</div>';
                 groupContainer.appendChild(categoryRow);
@@ -3076,39 +2483,10 @@ const getHTMLContent = (title) => `
                 domainsRow.appendChild(column2);
                 domainsRow.appendChild(column3);
                 
-                // 如果分类下没有域名，显示提示信息
-                if (groupDomains.length === 0) {
-                    const emptyMessage = document.createElement('div');
-                    emptyMessage.className = 'col-12 empty-state-container';
-                    emptyMessage.innerHTML = 
-                        '<div class="text-center py-3 rounded" style="background: rgba(255, 255, 255, 0.15); border: 1px solid rgba(255, 255, 255, 0.3); color: rgba(255, 255, 255, 0.9); display: table; width: 100%; height: 160px;">' +
-                            '<div style="display: table-cell; vertical-align: middle; width: 100%;">' +
-                                '<i class="iconfont icon-folder-open" style="font-size: 32px; opacity: 0.6; display: block; margin-bottom: 10px;"></i>' +
-                                '<p class="mb-1 small">该分类下暂无域名</p>' +
-                                '<small class="opacity-75" style="display: block; margin-bottom: 15px;">在此分类下添加域名</small>' +
-                                '<button class="btn btn-primary btn-sm add-domain-to-category" data-category-id="' + categoryData.id + '" data-category-name="' + categoryData.name + '">' +
-                                    '<i class="iconfont icon-jia" style="color: white;"></i> <span style="color: white;">添加域名</span>' +
-                                '</button>' +
-                            '</div>' +
-                        '</div>';
-                    domainsRow.appendChild(emptyMessage);
-                    return; // 跳过域名卡片创建
-                }
-                
                 // 为每个域名创建卡片，并按列分配
                 groupDomains.forEach((domain, index) => {
-                    // 检测屏幕尺寸，决定分配策略
-                    let columnIndex;
-                    const isMobile = window.innerWidth < 768; // Bootstrap的md断点
-                    
-                    if (isMobile) {
-                        // 移动端：所有域名都放在第一列，保持排序顺序
-                        columnIndex = 0;
-                    } else {
-                        // PC端：按列分配，轮询分配到各列
-                        columnIndex = index % 3;
-                    }
-                    
+                    // 决定将卡片放入哪一列
+                    const columnIndex = index % 3;
                     const targetColumn = columnIndex === 0 ? column1 : (columnIndex === 1 ? column2 : column3);
                     // 创建卡片容器
                     const domainCard = document.createElement('div');
@@ -3189,8 +2567,8 @@ const getHTMLContent = (title) => `
                             if (newDaysLeft >= cycleDays) {
                                 progressPercent = 100;
                             } else {
-                                // 使用精确计算，四舍五入后取整数位
-                                progressPercent = Math.round((newDaysLeft / cycleDays) * 100);
+                                // 使用精确计算，不进行四舍五入，保留整数部分
+                                progressPercent = Math.floor((newDaysLeft / cycleDays) * 100);
                             }
                         } else {
                             progressPercent = 0;
@@ -3200,8 +2578,8 @@ const getHTMLContent = (title) => `
                         if (daysLeft >= cycleDays) {
                             progressPercent = 100;
                         } else {
-                            // 使用精确计算，四舍五入后取整数位
-                            progressPercent = Math.round((daysLeft / cycleDays) * 100);
+                            // 使用精确计算，不进行四舍五入，保留整数部分
+                            progressPercent = Math.floor((daysLeft / cycleDays) * 100);
                         }
                     }
                     
@@ -3222,12 +2600,12 @@ const getHTMLContent = (title) => `
                     let progressCircleHtml = '';
                     
                     // 使用SVG实现圆环进度条
-                    const radius = 36; // 再次增加圆环半径
+                    const radius = 28; // 略小的圆环半径，确保不会太接近边缘
                     const circumference = 2 * Math.PI * radius; // 圆环周长
                     const offset = circumference - (progressPercent / 100) * circumference; // 计算偏移量
                     
                     // 创建SVG圆环进度条，增加SVG尺寸
-                    const svgSize = 85; // 再次增加SVG容器大小
+                    const svgSize = 65; // SVG容器大小
                     const svgCenter = svgSize / 2; // 居中
                     
                     // SVG圆环和百分比分开处理
@@ -3264,15 +2642,11 @@ const getHTMLContent = (title) => `
                     // 准备通知信息和上次续期信息
                     let infoHtml = '';
                     
-                    // 添加通知信息
-                    if (notifySettings.enabled) {
-                        const effectiveNotifyDays = notifySettings.useGlobalSettings ? globalNotifyDays : notifySettings.notifyDays;
-                        const notifyLabel = notifySettings.useGlobalSettings ? '全局通知: ' : '自定义通知: ';
+                    // 添加自定义通知信息
+                    if (!notifySettings.useGlobalSettings) {
                         infoHtml += '<small class="text-white d-inline-block me-3">' + 
-                            notifyLabel + effectiveNotifyDays + '天' + 
+                            (notifySettings.enabled ? '自定义通知: ' + notifySettings.notifyDays + '天' : '通知已禁用') + 
                             '</small>';
-                    } else {
-                        infoHtml += '<small class="text-white d-inline-block me-3">通知已禁用</small>';
                     }
                     
                     // 添加上次续期信息
@@ -3331,8 +2705,7 @@ const getHTMLContent = (title) => `
                         '<div class="collapse" id="details-' + domain.id + '">' +
                         '<div class="card-body pb-2">' +
                         '<div class="d-flex justify-content-between align-items-start mb-2" style="position: relative;">' +
-                        '<div class="flex-grow-1" style="padding-right: 95px; min-width: 0;">' +
-                        (domain.registrar ? '<p class="card-text mb-1" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; width: 100%; display: block;"><i class="iconfont icon-house-chimney"></i><strong>注册厂商:</strong> ' + domain.registrar + '</p>' : '') +
+                        '<div class="flex-grow-1" style="padding-right: 75px;">' +
                         (domain.registrationDate ? '<p class="card-text mb-1 text-nowrap" style="overflow: hidden; text-overflow: ellipsis;"><i class="iconfont icon-calendar-days"></i><strong>注册时间:</strong>' + formatDate(domain.registrationDate) + '</p>' : '') +
                         '<p class="card-text mb-1 text-nowrap" style="overflow: hidden; text-overflow: ellipsis;"><i class="iconfont icon-rili"></i><strong>到期日期:</strong>' + formatDate(domain.expiryDate) + '</p>' +
                         '<p class="card-text mb-1 text-nowrap" style="overflow: hidden; text-overflow: ellipsis;"><i class="iconfont icon-repeat"></i><strong>续期周期:</strong>' + 
@@ -3350,12 +2723,17 @@ const getHTMLContent = (title) => `
                         '</div>' +
                         (infoHtml ? '<div class="domain-info mb-2">' + infoHtml + '</div>' : '') +
                         '<div class="domain-actions">' +
+                        '<!-- 编辑按钮 -->' +
                         '<button class="btn btn-sm btn-primary edit-domain" data-id="' + domain.id + '" title="编辑域名"><i class="iconfont icon-pencil"></i> 编辑</button>' +
+                        '<!-- 续期按钮 -->' +
                         '<button class="btn btn-sm btn-success renew-domain" data-id="' + domain.id + '" data-name="' + domain.name + '" data-expiry="' + domain.expiryDate + '" title="续期域名"><i class="iconfont icon-arrows-rotate"></i> 续期</button>' +
+                        '<!-- 测试按钮 -->' +
                         '<button class="btn btn-sm btn-info test-domain-notify" data-id="' + domain.id + '" title="测试通知"><i class="iconfont icon-paper-plane"></i> 测试</button>' +
+                        '<!-- 续期链接按钮 -->' +
                         (domain.renewLink ? 
                         '<a href="' + domain.renewLink + '" target="_blank" class="btn btn-sm btn-warning" title="前往续期页面"><i class="iconfont icon-link"></i> 链接</a>' : 
                         '<button class="btn btn-sm btn-secondary" disabled title="未设置续期链接"><i class="iconfont icon-link"></i> 链接</button>') +
+                        '<!-- 删除按钮 -->' +
                         '<button class="btn btn-sm btn-danger delete-domain" data-id="' + domain.id + '" data-name="' + domain.name + '" title="删除域名"><i class="iconfont icon-shanchu"></i> 删除</button>' +
                         '</div>' +
                         '</div>' +
@@ -3368,21 +2746,33 @@ const getHTMLContent = (title) => `
                 });
             };
             
-                // 按分类顺序渲染域名分组
-    const sortedCategories = Object.values(domainGroups).sort((a, b) => a.order - b.order);
-    
-    // 首先渲染默认分类（只有在有域名的情况下）
-    const defaultCategory = sortedCategories.find(cat => cat.isDefault);
-    if (defaultCategory && defaultCategory.domains.length > 0) {
-        renderGroup(defaultCategory);
+                // 首先处理默认分类
+    if (domainGroups['默认分类'] && domainGroups['默认分类'].length > 0) {
+        renderGroup('默认分类', domainGroups['默认分类']);
+        delete domainGroups['默认分类'];
     }
     
-    // 然后渲染其他分类（包括空分类）
-    sortedCategories.forEach(category => {
-        if (!category.isDefault) {
-            renderGroup(category);
-        }
+    // 去除emoji的函数
+    function removeEmoji(str) {
+        // 匹配emoji的正则表达式
+        // 这个正则表达式匹配大多数常见的emoji
+        return str.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F700}-\u{1F77F}\u{1F780}-\u{1F7FF}\u{1F800}-\u{1F8FF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '');
+    }
+    
+    // 然后处理其他分类（按名称升序排列，忽略emoji）
+    const sortedGroupNames = Object.keys(domainGroups).sort((a, b) => {
+        // 去除emoji后再进行比较
+        const aNoEmoji = removeEmoji(a).trim().toLowerCase();
+        const bNoEmoji = removeEmoji(b).trim().toLowerCase();
+        
+        // 使用localeCompare进行字符串比较，确保正确处理各种语言字符
+        return aNoEmoji.localeCompare(bNoEmoji, 'en');
     });
+    
+    // 按排序后的顺序渲染其他分类
+    for (const groupName of sortedGroupNames) {
+        renderGroup(groupName, domainGroups[groupName]);
+    }
             
             // 添加事件监听器
             document.querySelectorAll('.edit-domain').forEach(button => {
@@ -3391,14 +2781,6 @@ const getHTMLContent = (title) => `
             
             document.querySelectorAll('.delete-domain').forEach(button => {
                 button.addEventListener('click', () => showDeleteModal(button.dataset.id, button.dataset.name));
-            });
-            
-            // 分类下添加域名按钮事件
-            document.querySelectorAll('.add-domain-to-category').forEach(button => {
-                button.addEventListener('click', async () => {
-                    const categoryId = button.getAttribute('data-category-id');
-                    await openAddDomainModal(categoryId);
-                });
             });
             
             document.querySelectorAll('.renew-domain').forEach(button => {
@@ -3448,6 +2830,10 @@ const getHTMLContent = (title) => `
                         // 切换到自动折叠模式
                         viewMode = 'auto-collapse';
                         
+                        // 更新视图按钮文本
+                        document.getElementById('viewStyleDropdown').innerHTML = 
+                            '<i class="iconfont icon-eye"></i> <span style="color: white;">列表样式</span>';
+                        
                         // 获取当前按钮对应的卡片详情
                         const collapseTarget = document.querySelector(button.getAttribute('data-bs-target'));
                         
@@ -3495,7 +2881,6 @@ const getHTMLContent = (title) => `
             const expiryDate = document.getElementById('expiryDate').value;
             const registrationDate = document.getElementById('registrationDate').value;
             const registrar = document.getElementById('registrar').value;
-            const categoryId = document.getElementById('domainCategory').value || 'default';
             const customNote = document.getElementById('customNote').value;
             const noteColor = document.getElementById('noteColor').value;
             const renewLink = document.getElementById('renewLink').value;
@@ -3535,13 +2920,13 @@ const getHTMLContent = (title) => `
                 currency: priceCurrency,
                 unit: priceUnit
             } : null;
+
             
             const domainData = {
                 name,
                 expiryDate,
                 registrationDate,
                 registrar,
-                categoryId,
                 customNote,
                 noteColor,
                 renewLink,
@@ -3585,41 +2970,6 @@ const getHTMLContent = (title) => `
                     }
                 }
                 
-                // 打开添加域名模态框并预选分类
-                async function openAddDomainModal(categoryId) {
-                    // 重置表单
-                    resetForm();
-                    
-                    // 设置模态框标题为添加模式
-                    document.querySelector('#addDomainModal .modal-title').textContent = '添加域名';
-                    
-                    // 确保分类数据已加载
-                    let currentCategories = categories;
-                    if (!currentCategories || currentCategories.length === 0) {
-                        try {
-                            const response = await fetch('/api/categories');
-                            if (response.ok) {
-                                currentCategories = await response.json();
-                                categories = currentCategories; // 同步到全局变量
-                            }
-                        } catch (error) {
-                            // 加载分类失败时静默处理
-                        }
-                    }
-                    
-                    // 立即更新分类选择框，传入分类数据和预选分类
-                    updateCategorySelect(currentCategories, categoryId);
-                    
-                    // 显示模态框
-                    const modal = new bootstrap.Modal(document.getElementById('addDomainModal'));
-                    modal.show();
-                    
-                    // 预选分类（在模态框显示后再次设置确保正确）
-                    modal._element.addEventListener('shown.bs.modal', function() {
-                        updateCategorySelect(currentCategories, categoryId);
-                    }, { once: true });
-                }
-                
                 // 编辑域名
                 function editDomain(id) {
                     const domain = domains.find(d => d.id === id);
@@ -3630,8 +2980,6 @@ const getHTMLContent = (title) => `
                     document.getElementById('expiryDate').value = domain.expiryDate;
                     document.getElementById('registrationDate').value = domain.registrationDate !== undefined ? domain.registrationDate : '';
                     document.getElementById('registrar').value = domain.registrar !== undefined ? domain.registrar : '';
-                    // 设置分类选择
-                    updateCategorySelect(categories, domain.categoryId || 'default');
                     document.getElementById('customNote').value = domain.customNote !== undefined ? domain.customNote : '';
                     // 设置标签颜色（如果有）
                     if (domain.noteColor) {
@@ -3691,15 +3039,9 @@ const getHTMLContent = (title) => `
                     setTimeout(() => {
                         // 等待模态框完全显示后执行
                         document.getElementById('expiryDate').removeAttribute('readonly');
-                        const expiryLabel = document.querySelector('label[for="expiryDate"]');
-                        if (expiryLabel) {
-                            expiryLabel.innerHTML = '<i class="iconfont icon-calendar-days"></i> 到期日期 <span style="color: red;">*</span>';
-                            const helpText = expiryLabel.nextElementSibling && expiryLabel.nextElementSibling.nextElementSibling;
-                            if (helpText) {
-                                helpText.textContent = '根据注册时间和续期周期自动计算，可手动调整';
-                                helpText.className = 'form-text text-info';
-                            }
-                        }
+                        document.querySelector('label[for="expiryDate"]').innerHTML = '<i class="iconfont icon-calendar-days"></i> 到期日期(必填)';
+                        document.querySelector('label[for="expiryDate"]').nextElementSibling.nextElementSibling.textContent = '根据注册时间和续期周期自动计算，可手动调整';
+                        document.querySelector('label[for="expiryDate"]').nextElementSibling.nextElementSibling.className = 'form-text text-info';
                         updateNotePreview(); // 更新备注预览
                     }, 100);
                 }
@@ -3848,573 +3190,11 @@ const getHTMLContent = (title) => `
                     
                     // 重置到期日期字段状态（添加新域名时保持可编辑）
                     document.getElementById('expiryDate').removeAttribute('readonly');
-                    const expiryLabel = document.querySelector('label[for="expiryDate"]');
-                    if (expiryLabel) {
-                        expiryLabel.innerHTML = '<i class="iconfont icon-calendar-days"></i> 到期日期 <span style="color: red;">*</span>';
-                        const helpText = expiryLabel.nextElementSibling && expiryLabel.nextElementSibling.nextElementSibling;
-                        if (helpText) {
-                            helpText.textContent = '根据注册时间和续期周期自动计算，可手动调整';
-                            helpText.className = 'form-text text-info';
-                        }
-                    }
-                    
-                    // 重置WHOIS查询状态
-                    const whoisStatus = document.getElementById('whoisQueryStatus');
-                    if (whoisStatus) {
-                        whoisStatus.style.display = 'none';
-                        whoisStatus.innerHTML = '';
-                    }
+                    document.querySelector('label[for="expiryDate"]').innerHTML = '<i class="iconfont icon-calendar-days"></i> 到期日期(必填)';
+                    document.querySelector('label[for="expiryDate"]').nextElementSibling.nextElementSibling.textContent = '根据注册时间和续期周期自动计算，可手动调整';
+                    document.querySelector('label[for="expiryDate"]').nextElementSibling.nextElementSibling.className = 'form-text text-info';
                     
                     document.querySelector('#addDomainModal .modal-title').textContent = '添加新域名';
-                }
-                
-                // ================================
-                // 分类管理功能
-                // ================================
-                
-                // 全局变量存储分类数据
-                let categories = [];
-                
-                // 加载分类数据
-                async function loadCategories() {
-                    try {
-                        const response = await fetch('/api/categories');
-                        if (response.ok) {
-                            categories = await response.json();
-                            updateCategorySelect();
-                            // 只有在分类管理模态框存在时才渲染分类列表
-                            if (document.getElementById('categoryList')) {
-                                renderCategoryList();
-                            }
-                        }
-                    } catch (error) {
-                        // 加载分类失败时静默处理
-                    }
-                }
-                
-                // 更新分类选择下拉框
-                function updateCategorySelect(categoryData = null, selectedCategoryId = null) {
-                    const categorySelect = document.getElementById('domainCategory');
-                    if (!categorySelect) return;
-                    
-                    // 使用传入的数据或全局数据
-                    const dataToUse = categoryData || categories;
-                    
-                    // 清空现有选项
-                    categorySelect.innerHTML = '';
-                    
-                    // 检查分类数据是否存在
-                    if (!dataToUse || !Array.isArray(dataToUse)) {
-                        return;
-                    }
-                    
-                    // 首先添加默认分类
-                    const defaultCategory = dataToUse.find(cat => cat.isDefault);
-                    if (defaultCategory) {
-                        const option = document.createElement('option');
-                        option.value = defaultCategory.id;
-                        option.textContent = defaultCategory.name;
-                        // 如果没有指定选择的分类，或者指定的就是默认分类，则选中默认分类
-                        option.selected = !selectedCategoryId || selectedCategoryId === defaultCategory.id;
-                        categorySelect.appendChild(option);
-                    }
-                    
-                    // 然后添加用户自定义分类
-                    dataToUse.filter(cat => !cat.isDefault).forEach(category => {
-                        const option = document.createElement('option');
-                        option.value = category.id;
-                        option.textContent = category.name;
-                        // 如果指定的分类是当前分类，则选中
-                        option.selected = selectedCategoryId === category.id;
-                        categorySelect.appendChild(option);
-                    });
-                }
-                
-                // 渲染分类列表
-                function renderCategoryList() {
-                    const categoryList = document.getElementById('categoryList');
-                    if (!categoryList) return;
-                    
-                    if (categories.length === 0) {
-                        categoryList.innerHTML = '<div class="text-center p-3 text-muted">暂无分类</div>';
-                        return;
-                    }
-                    
-                    categoryList.innerHTML = '';
-                    
-                    // 筛选出非默认分类
-                    const userCategories = categories.filter(cat => !cat.isDefault);
-                    
-                    if (userCategories.length === 0) {
-                        categoryList.innerHTML = '<div class="text-center p-3 text-muted">暂无自定义分类</div>';
-                        return;
-                    }
-                    
-                    userCategories.forEach((category, index) => {
-                        const categoryItem = document.createElement('div');
-                        categoryItem.className = 'mb-3 p-3 rounded category-item';
-                        categoryItem.style.cssText = 'background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); backdrop-filter: blur(10px);';
-                        categoryItem.innerHTML = 
-                            '<div class="d-flex justify-content-between align-items-start">' +
-                                '<div class="flex-grow-1">' +
-                                    '<h6 class="mb-1 fw-bold text-white">' + category.name + '</h6>' +
-                                    '<small class="text-light opacity-75">' + (category.description || '无描述') + '</small>' +
-                                '</div>' +
-                                '<div class="d-flex gap-2 ms-3">' +
-                                    '<button type="button" class="btn btn-outline-light move-category-up" data-id="' + category.id + '" ' + (index === 0 ? 'disabled' : '') + ' title="上移" style="width: 32px; height: 32px; padding: 0; display: flex; align-items: center; justify-content: center; border-radius: 6px; line-height: 1;">' +
-                                        '<i class="iconfont icon-shangjiantou1" style="color: white; font-size: 14px; display: block; line-height: 1; margin: 0; vertical-align: middle;"></i>' +
-                                    '</button>' +
-                                    '<button type="button" class="btn btn-outline-light move-category-down" data-id="' + category.id + '" ' + (index === userCategories.length - 1 ? 'disabled' : '') + ' title="下移" style="width: 32px; height: 32px; padding: 0; display: flex; align-items: center; justify-content: center; border-radius: 6px; line-height: 1;">' +
-                                        '<i class="iconfont icon-xiajiantou1" style="color: white; font-size: 14px; display: block; line-height: 1; margin: 0; vertical-align: middle;"></i>' +
-                                    '</button>' +
-                                    '<button type="button" class="btn btn-primary edit-category" data-id="' + category.id + '" title="编辑" style="width: 32px; height: 32px; padding: 0; display: flex; align-items: center; justify-content: center; border-radius: 6px; line-height: 1;">' +
-                                        '<i class="iconfont icon-pencil" style="color: white; font-size: 14px; display: block; line-height: 1; margin: 0; vertical-align: middle;"></i>' +
-                                    '</button>' +
-                                    '<button type="button" class="btn btn-outline-danger delete-category" data-id="' + category.id + '" title="删除" style="width: 32px; height: 32px; padding: 0; display: flex; align-items: center; justify-content: center; border-radius: 6px; line-height: 1;">' +
-                                        '<i class="iconfont icon-shanchu" style="color: white; font-size: 14px; display: block; line-height: 1; margin: 0; vertical-align: middle;"></i>' +
-                                    '</button>' +
-                                '</div>' +
-                            '</div>';
-                        categoryList.appendChild(categoryItem);
-                    });
-                    
-                    // 添加事件监听器
-                    bindCategoryEvents();
-                }
-                
-                // 绑定分类管理事件
-                function bindCategoryEvents() {
-                    // 编辑分类
-                    document.querySelectorAll('.edit-category').forEach(btn => {
-                        btn.addEventListener('click', function() {
-                            const categoryId = this.dataset.id;
-                            editCategory(categoryId);
-                        });
-                    });
-                    
-                    // 上移分类
-                    document.querySelectorAll('.move-category-up').forEach(btn => {
-                        btn.addEventListener('click', function() {
-                            const categoryId = this.dataset.id;
-                            moveCategoryOrder(categoryId, 'up');
-                        });
-                    });
-                    
-                    // 下移分类
-                    document.querySelectorAll('.move-category-down').forEach(btn => {
-                        btn.addEventListener('click', function() {
-                            const categoryId = this.dataset.id;
-                            moveCategoryOrder(categoryId, 'down');
-                        });
-                    });
-                    
-                    // 删除分类
-                    document.querySelectorAll('.delete-category').forEach(btn => {
-                        btn.addEventListener('click', function() {
-                            const categoryId = this.dataset.id;
-                            deleteCategory(categoryId);
-                        });
-                    });
-                }
-                
-                // 添加分类
-                async function addCategory() {
-                    const nameInput = document.getElementById('categoryName');
-                    const descInput = document.getElementById('categoryDescription');
-                    
-                    if (!nameInput || !descInput) {
-                        return;
-                    }
-                    
-                    const name = nameInput.value.trim();
-                    const description = descInput.value.trim();
-                    
-                    if (!name) {
-                        showAlert('danger', '分类名称不能为空');
-                        return;
-                    }
-                    
-                    try {
-                        const response = await fetch('/api/categories', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ name, description })
-                        });
-                        
-                        if (!response.ok) {
-                            const error = await response.json();
-                            throw new Error(error.error || '添加分类失败');
-                        }
-                        
-                        // 清空输入框
-                        if (nameInput) nameInput.value = '';
-                        if (descInput) descInput.value = '';
-                        
-                        // 重新加载分类列表和域名列表
-                        await loadCategories();
-                        await loadDomains(); // 刷新域名列表以更新分类选择框
-                        showAlert('success', '分类添加成功');
-                    } catch (error) {
-                        showAlert('danger', error.message);
-                    }
-                }
-                
-                // 编辑分类
-                function editCategory(categoryId) {
-                    const category = categories.find(cat => cat.id === categoryId);
-                    if (!category) return;
-                    
-                    // 找到对应的分类项目
-                    const categoryItems = document.querySelectorAll('#categoryList .category-item');
-                    let targetItem = null;
-                    
-                    categoryItems.forEach(item => {
-                        if (item.querySelector('[data-id="' + categoryId + '"]')) {
-                            targetItem = item;
-                        }
-                    });
-                    
-                    if (!targetItem) return;
-                    
-                    // 保存原始内容
-                    const originalContent = targetItem.innerHTML;
-                    
-                    // 替换为编辑表单
-                    targetItem.innerHTML = 
-                        '<div class="p-3 rounded" style="background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2);">' +
-                            '<div class="mb-3">' +
-                                '<label class="form-label text-white small">分类名称</label>' +
-                                '<input type="text" class="form-control form-control-sm" id="editName_' + categoryId + '" value="' + category.name.replace(/"/g, '&quot;') + '" maxlength="50">' +
-                            '</div>' +
-                            '<div class="mb-3">' +
-                                '<label class="form-label text-white small">描述</label>' +
-                                '<input type="text" class="form-control form-control-sm" id="editDesc_' + categoryId + '" value="' + (category.description || '').replace(/"/g, '&quot;') + '" maxlength="100">' +
-                            '</div>' +
-                            '<div class="d-flex gap-2">' +
-                                '<button type="button" class="btn btn-success btn-sm save-edit" data-id="' + categoryId + '">' +
-                                    '<i class="iconfont icon-check" style="color: white;"></i> <span style="color: white;">保存</span>' +
-                                '</button>' +
-                                '<button type="button" class="btn btn-secondary btn-sm cancel-edit" data-id="' + categoryId + '">' +
-                                    '<i class="iconfont icon-xmark" style="color: white;"></i> <span style="color: white;">取消</span>' +
-                                '</button>' +
-                            '</div>' +
-                        '</div>';
-                    
-                    // 添加保存按钮事件
-                    targetItem.querySelector('.save-edit').addEventListener('click', function() {
-                        const nameInput = document.getElementById('editName_' + categoryId);
-                        const descInput = document.getElementById('editDesc_' + categoryId);
-                        
-                        const newName = nameInput.value.trim();
-                        const newDesc = descInput.value.trim();
-                        
-                        if (!newName) {
-                            showAlert('danger', '分类名称不能为空');
-                            nameInput.focus();
-                            return;
-                        }
-                        
-                        updateCategory(categoryId, newName, newDesc);
-                    });
-                    
-                    // 添加取消按钮事件
-                    targetItem.querySelector('.cancel-edit').addEventListener('click', function() {
-                        targetItem.innerHTML = originalContent;
-                        bindCategoryEvents(); // 重新绑定事件
-                    });
-                    
-                    // 聚焦到名称输入框
-                    document.getElementById('editName_' + categoryId).focus();
-                }
-                
-                // 更新分类
-                async function updateCategory(categoryId, name, description) {
-                    try {
-                        const response = await fetch('/api/categories/' + categoryId, {
-                            method: 'PUT',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ name, description })
-                        });
-                        
-                        if (!response.ok) {
-                            const error = await response.json();
-                            throw new Error(error.error || '更新分类失败');
-                        }
-                        
-                        await loadCategories();
-                        await loadDomains(); // 同时刷新域名列表，因为分类名称变化会影响显示
-                        showAlert('success', '分类更新成功');
-                    } catch (error) {
-                        showAlert('danger', error.message);
-                    }
-                }
-                
-                // 显示删除分类确认模态框
-                function deleteCategory(categoryId) {
-                    const category = categories.find(cat => cat.id === categoryId);
-                    if (!category) return;
-                    
-                    currentCategoryId = categoryId;
-                    document.getElementById('deleteCategoryModalName').textContent = category.name;
-                    
-                    // 重置勾选框状态
-                    const checkbox = document.getElementById('confirmDeleteCheckbox');
-                    const deleteBtn = document.getElementById('confirmDeleteCategoryBtn');
-                    checkbox.checked = false;
-                    deleteBtn.disabled = true;
-                    
-                    const modal = new bootstrap.Modal(document.getElementById('deleteCategoryModal'));
-                    modal.show();
-                }
-                
-                // 确认删除分类
-                async function confirmDeleteCategory() {
-                    if (!currentCategoryId) return;
-                    
-                    try {
-                        const response = await fetch('/api/categories/' + currentCategoryId, {
-                            method: 'DELETE'
-                        });
-                        
-                        if (!response.ok) {
-                            const error = await response.json();
-                            throw new Error(error.error || '删除分类失败');
-                        }
-                        
-                        // 关闭模态框
-                        bootstrap.Modal.getInstance(document.getElementById('deleteCategoryModal')).hide();
-                        currentCategoryId = null;
-                        
-                        await loadCategories();
-                        await loadDomains(); // 重新加载域名以更新显示
-                        showAlert('success', '分类删除成功');
-                    } catch (error) {
-                        showAlert('danger', error.message);
-                    }
-                }
-                
-                // 移动分类顺序
-                async function moveCategoryOrder(categoryId, direction) {
-                    try {
-                        const response = await fetch('/api/categories/' + categoryId + '/move', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ direction })
-                        });
-                        
-                        if (!response.ok) {
-                            const error = await response.json();
-                            throw new Error(error.error || '移动分类失败');
-                        }
-                        
-                        await loadCategories();
-                        await loadDomains(); // 同时刷新域名列表，因为分类顺序变化会影响显示
-                        showAlert('success', '分类顺序更新成功');
-                    } catch (error) {
-                        showAlert('danger', error.message);
-                    }
-                }
-                
-                // 显示WHOIS查询状态
-                function showWhoisStatus(message, type = 'info') {
-                    const statusDiv = document.getElementById('whoisQueryStatus');
-                    statusDiv.style.display = 'block';
-                    statusDiv.className = 'alert alert-' + type + ' py-2';
-                    statusDiv.innerHTML = '<i class="iconfont icon-' + (type === 'info' ? 'loading' : type === 'success' ? 'check-circle' : 'exclamation-circle') + '"></i> ' + message;
-                    
-                    // 3秒后自动隐藏非错误消息
-                    if (type !== 'danger') {
-                        setTimeout(() => {
-                            statusDiv.style.display = 'none';
-                        }, 3000);
-                    }
-                }
-                
-                // 执行WHOIS查询并填充表单
-                async function performWhoisQuery(domain, controller) {
-                    const queryBtn = document.getElementById('whoisQueryBtn');
-                    const originalText = queryBtn.innerHTML;
-                    
-                    try {
-                        // 显示查询中状态
-                        queryBtn.disabled = true;
-                        queryBtn.innerHTML = '<i class="spinner-border spinner-border-sm me-2"></i>查询中...';
-                        showWhoisStatus('正在查询域名信息，请稍候...', 'info');
-                        
-                        // 调用后端API，支持取消
-                        const response = await fetch('/api/whois', {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json'
-                            },
-                            body: JSON.stringify({ domain: domain }),
-                            signal: controller.signal
-                        });
-                        
-                        const result = await response.json();
-                        
-                        if (!response.ok) {
-                            throw new Error(result.error || 'API请求失败');
-                        }
-                        
-                        if (result.success) {
-                            // 查询成功，填充表单数据
-                            const fillResult = fillFormWithWhoisData(result);
-                            if (fillResult) {
-                                showWhoisStatus('域名信息查询成功，已自动填充相关字段', 'success');
-                            }
-                        } else {
-                            // 查询失败
-                            showWhoisStatus('查询失败: ' + (result.error || '未知错误'), 'danger');
-                        }
-                        
-                    } catch (error) {
-                        // 如果是用户取消的请求，不显示错误信息
-                        if (error.name === 'AbortError') {
-                            showWhoisStatus('查询已取消', 'info');
-                        } else {
-                            showWhoisStatus('查询失败: ' + error.message, 'danger');
-                        }
-                    } finally {
-                        // 恢复按钮状态
-                        queryBtn.disabled = false;
-                        queryBtn.innerHTML = originalText;
-                        
-                        // 清除控制器引用
-                        if (currentWhoisController === controller) {
-                            currentWhoisController = null;
-                        }
-                    }
-                }
-                
-                // 使用WHOIS数据填充表单
-                function fillFormWithWhoisData(whoisData) {
-                    let filledFields = []; // 记录成功填充的字段
-                    let missingFields = []; // 记录缺失的字段
-                    
-                    // 清除之前的高亮样式
-                    document.getElementById('registrar').classList.remove('auto-filled');
-                    document.getElementById('registrationDate').classList.remove('auto-filled');
-                    document.getElementById('expiryDate').classList.remove('auto-filled');
-                    document.getElementById('renewCycleValue').classList.remove('auto-filled');
-                    document.getElementById('renewCycleUnit').classList.remove('auto-filled');
-                    
-                    // 填充注册商
-                    if (whoisData.registrar) {
-                        const registrarField = document.getElementById('registrar');
-                        registrarField.value = whoisData.registrar;
-                        registrarField.classList.add('auto-filled');
-                        filledFields.push('注册商');
-                    } else {
-                        missingFields.push('注册商');
-                    }
-                    
-                    // 填充注册日期
-                    if (whoisData.registrationDate) {
-                        const registrationDateField = document.getElementById('registrationDate');
-                        registrationDateField.value = whoisData.registrationDate;
-                        registrationDateField.classList.add('auto-filled');
-                        filledFields.push('注册日期');
-                    } else {
-                        missingFields.push('注册日期');
-                    }
-                    
-                    // 填充到期日期
-                    if (whoisData.expiryDate) {
-                        const expiryDateField = document.getElementById('expiryDate');
-                        expiryDateField.value = whoisData.expiryDate;
-                        expiryDateField.classList.add('auto-filled');
-                        filledFields.push('到期日期');
-                    } else {
-                        missingFields.push('到期日期');
-                    }
-                    
-                    // 自动计算续期周期（仅当有注册日期和到期日期时）
-                    if (whoisData.registrationDate && whoisData.expiryDate) {
-                        calculateRenewCycle(whoisData.registrationDate, whoisData.expiryDate);
-                        // 为自动计算的续期周期添加高亮效果
-                        document.getElementById('renewCycleValue').classList.add('auto-filled');
-                        document.getElementById('renewCycleUnit').classList.add('auto-filled');
-                        filledFields.push('续期周期');
-                    }
-                    
-                    // 根据填充结果显示相应提示
-                    if (filledFields.length > 0) {
-                        let message = '已自动填充: ' + filledFields.join('、');
-                        if (missingFields.length > 0) {
-                            message += '；未查询到: ' + missingFields.join('、');
-                        }
-                        showWhoisStatus(message, 'success');
-                        return true;
-                    } else {
-                        showWhoisStatus('未能获取到任何有效的域名信息', 'warning');
-                        return false;
-                    }
-                }
-                
-                // 根据注册时间和到期时间计算续期周期
-                function calculateRenewCycle(registrationDate, expiryDate) {
-                    try {
-                        const regDate = new Date(registrationDate);
-                        const expDate = new Date(expiryDate);
-                        
-                        // 计算时间差（毫秒）
-                        const timeDiff = expDate.getTime() - regDate.getTime();
-                        
-                        // 转换为天数
-                        const daysDiff = Math.round(timeDiff / (1000 * 60 * 60 * 24));
-                        
-                        // 根据天数推算续期周期
-                        if (daysDiff >= 360 && daysDiff <= 370) {
-                            // 1年 (365天左右，考虑闰年)
-                            document.getElementById('renewCycleValue').value = '1';
-                            document.getElementById('renewCycleUnit').value = 'year';
-                        } else if (daysDiff >= 720 && daysDiff <= 740) {
-                            // 2年
-                            document.getElementById('renewCycleValue').value = '2';
-                            document.getElementById('renewCycleUnit').value = 'year';
-                        } else if (daysDiff >= 1080 && daysDiff <= 1110) {
-                            // 3年
-                            document.getElementById('renewCycleValue').value = '3';
-                            document.getElementById('renewCycleUnit').value = 'year';
-                        } else if (daysDiff >= 1800 && daysDiff <= 1830) {
-                            // 5年
-                            document.getElementById('renewCycleValue').value = '5';
-                            document.getElementById('renewCycleUnit').value = 'year';
-                        } else if (daysDiff >= 3600 && daysDiff <= 3670) {
-                            // 10年
-                            document.getElementById('renewCycleValue').value = '10';
-                            document.getElementById('renewCycleUnit').value = 'year';
-                        } else if (daysDiff >= 28 && daysDiff <= 31) {
-                            // 1个月
-                            document.getElementById('renewCycleValue').value = '1';
-                            document.getElementById('renewCycleUnit').value = 'month';
-                        } else if (daysDiff >= 85 && daysDiff <= 95) {
-                            // 3个月
-                            document.getElementById('renewCycleValue').value = '3';
-                            document.getElementById('renewCycleUnit').value = 'month';
-                        } else if (daysDiff >= 175 && daysDiff <= 185) {
-                            // 6个月
-                            document.getElementById('renewCycleValue').value = '6';
-                            document.getElementById('renewCycleUnit').value = 'month';
-                        } else {
-                            // 其他情况，计算最接近的年数
-                            const years = Math.round(daysDiff / 365);
-                            if (years >= 1) {
-                                document.getElementById('renewCycleValue').value = years.toString();
-                                document.getElementById('renewCycleUnit').value = 'year';
-                            } else {
-                                // 小于1年的情况，按月计算
-                                const months = Math.round(daysDiff / 30);
-                                document.getElementById('renewCycleValue').value = Math.max(1, months).toString();
-                                document.getElementById('renewCycleUnit').value = 'month';
-                            }
-                        }
-                    } catch (error) {
-                        // 出错时使用默认值
-                        document.getElementById('renewCycleValue').value = '1';
-                        document.getElementById('renewCycleUnit').value = 'year';
-                    }
                 }
                 
                 // 显示提示信息
@@ -4455,7 +3235,11 @@ const getHTMLContent = (title) => `
                     }, 3000);
                 }
                 
-
+                // 格式化日期
+                function formatDate(dateString) {
+                    const date = new Date(dateString);
+                    return date.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' });
+                }
 
                 // 添加测试单个域名通知的函数
                 async function testDomainNotification(domainId) {
@@ -4531,19 +3315,10 @@ const getHTMLContent = (title) => `
     </html>
 `;
 
-// ================================
-// 主请求处理函数
-// ================================
-
 // 处理请求
 async function handleRequest(request) {
   const url = new URL(request.url);
   const path = url.pathname;
-  
-  // 配置检测API（在KV检查之前处理）
-  if (path === '/api/check-setup' && request.method === 'GET') {
-    return await checkSetupStatus();
-  }
   
   // 检查是否已配置KV空间
   if (!isKVConfigured()) {
@@ -4649,7 +3424,7 @@ async function handleRequest(request) {
   if (path === '/' || (!path.startsWith('/api/') && path !== '/dashboard')) {
     // 如果已登录，重定向到dashboard
     if (isAuthenticated) {
-      return Response.redirect(url.origin + '/dashboard', 302);
+      return Response.redirect(`${url.origin}/dashboard`, 302);
     }
     
     const loginHtml = getLoginHTML(siteTitle);
@@ -4679,9 +3454,7 @@ async function handleRequest(request) {
   });
 }
 
-// ================================
-// API处理函数区域
-// ================================
+
 
 // 处理API请求
 async function handleApiRequest(request) {
@@ -4761,6 +3534,7 @@ async function handleApiRequest(request) {
       const config = await saveTelegramConfig(configData);
       return jsonResponse(config);
     } catch (error) {
+      console.error('保存Telegram配置失败:', error);
       return jsonResponse({ error: '保存Telegram配置失败: ' + error.message }, 400);
     }
   }
@@ -4786,209 +3560,14 @@ async function handleApiRequest(request) {
     }
   }
   
-  // ================================
-  // 分类管理API
-  // ================================
-  
-  // 获取所有分类
-  if (path === '/api/categories' && request.method === 'GET') {
-    try {
-      const categories = await getCategories();
-      return jsonResponse(categories);
-    } catch (error) {
-      return jsonResponse({ error: '获取分类列表失败' }, 500);
-    }
-  }
-  
-  // 添加新分类
-  if (path === '/api/categories' && request.method === 'POST') {
-    try {
-      const categoryData = await request.json();
-      const category = await addCategory(categoryData);
-      return jsonResponse(category, 201);
-    } catch (error) {
-      return jsonResponse({ error: error.message || '添加分类失败' }, 400);
-    }
-  }
-  
-  // 更新分类
-  if (path.match(/^\/api\/categories\/[^\/]+$/) && request.method === 'PUT') {
-    const id = path.split('/').pop();
-    try {
-      const categoryData = await request.json();
-      const category = await updateCategory(id, categoryData);
-      return jsonResponse(category);
-    } catch (error) {
-      return jsonResponse({ error: error.message || '更新分类失败' }, 400);
-    }
-  }
-  
-  // 删除分类
-  if (path.match(/^\/api\/categories\/[^\/]+$/) && request.method === 'DELETE') {
-    const id = path.split('/').pop();
-    try {
-      await deleteCategory(id);
-      return jsonResponse({ success: true });
-    } catch (error) {
-      return jsonResponse({ error: error.message || '删除分类失败' }, 400);
-    }
-  }
-  
-  // 分类排序（上移/下移）
-  if (path.match(/^\/api\/categories\/[^\/]+\/move$/) && request.method === 'POST') {
-    const id = path.split('/')[3];
-    try {
-      const { direction } = await request.json();
-      await moveCategoryOrder(id, direction);
-      return jsonResponse({ success: true });
-    } catch (error) {
-      return jsonResponse({ error: error.message || '移动分类失败' }, 400);
-    }
-  }
-
-  // WHOIS域名查询
-  if (path === '/api/whois' && request.method === 'POST') {
-    try {
-      const { domain } = await request.json();
-      if (!domain) {
-        return jsonResponse({ error: '域名参数不能为空' }, 400);
-      }
-      
-      // 验证域名格式
-      const domainRegex = /^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$/;
-      if (!domainRegex.test(domain)) {
-        return jsonResponse({ error: '仅支持自动查询一级域名' }, 400);
-      }
-      
-      // 验证是否为一级域名（只能有一个点）
-      const dotCount = domain.split('.').length - 1;
-      if (dotCount !== 1) {
-        if (dotCount === 0) {
-          return jsonResponse({ error: '请输入完整的域名（如：example.com）' }, 400);
-        } else {
-          return jsonResponse({ error: '只能查询一级域名，不支持二级域名查询' }, 400);
-        }
-      }
-      
-      const result = await queryDomainWhois(domain);
-      return jsonResponse(result);
-    } catch (error) {
-      return jsonResponse({ error: 'WHOIS查询失败: ' + error.message }, 400);
-    }
-  }
-  
   // 404 - 路由不存在
   return jsonResponse({ error: '未找到请求的资源' }, 404);
 }
 
-// ================================
-// 配置检测函数区域
-// ================================
-
-// 检查KV绑定状态
-async function checkKVBinding() {
-  try {
-    if (typeof DOMAIN_MONITOR === 'undefined' || !DOMAIN_MONITOR) {
-      return {
-        isValid: false,
-        error: 'DOMAIN_MONITOR KV namespace is not bound',
-        message: 'KV存储空间未绑定'
-      };
-    }
-    
-    // 尝试访问KV存储
-    await DOMAIN_MONITOR.get('test');
-    return {
-      isValid: true,
-      message: 'KV存储空间已正确绑定'
-    };
-  } catch (error) {
-    return {
-      isValid: false,
-      error: error.message,
-      message: 'KV存储空间访问失败'
-    };
-  }
-}
-
-// 检查完整的配置状态
-async function checkSetupStatus() {
-  try {
-    const kvStatus = await checkKVBinding();
-    
-    if (!kvStatus.isValid) {
-      return new Response(JSON.stringify({
-        success: false,
-        message: kvStatus.message,
-        details: kvStatus.error,
-        nextStep: 'bindKV'
-      }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
-    
-    // 获取正确的密码配置
-    let correctPassword = 'domain';
-    if (typeof TOKEN !== 'undefined' && TOKEN) {
-      correctPassword = TOKEN;
-    } else if (DEFAULT_TOKEN) {
-      correctPassword = DEFAULT_TOKEN;
-    }
-    
-    // 检查是否需要认证（域名监控系统默认需要认证）
-    const authRequired = true;
-    
-    const result = {
-      success: true,
-      message: '配置检查完成',
-      kvBound: true,
-      authRequired: authRequired,
-      hasAuth: authRequired && !!correctPassword,
-      nextStep: authRequired ? 'login' : 'dashboard'
-    };
-    
-    return new Response(JSON.stringify(result), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' }
-    });
-  } catch (error) {
-    return new Response(JSON.stringify({
-      success: false,
-      message: '配置检查失败',
-      details: error.message,
-      nextStep: 'retry'
-    }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' }
-    });
-  }
-}
-
-// ================================
-// 数据操作函数区域
-// ================================
-
 // 获取所有域名
 async function getDomains() {
   const domainsStr = await DOMAIN_MONITOR.get('domains') || '[]';
-  const domains = JSON.parse(domainsStr);
-  
-  // 数据迁移：为没有categoryId的域名添加默认分类
-  let needUpdate = false;
-  domains.forEach(domain => {
-    if (!domain.categoryId) {
-      domain.categoryId = 'default';
-      needUpdate = true;
-    }
-  });
-  
-  // 如果有数据需要更新，保存到KV
-  if (needUpdate) {
-    await DOMAIN_MONITOR.put('domains', JSON.stringify(domains));
-  }
-  
-  return domains;
+  return JSON.parse(domainsStr);
 }
 
 // 添加新域名
@@ -5069,7 +3648,6 @@ async function updateDomain(id, domainData) {
     expiryDate: domainData.expiryDate,
     registrationDate: domainData.registrationDate !== undefined ? domainData.registrationDate : domains[index].registrationDate,
     registrar: domainData.registrar !== undefined ? domainData.registrar : domains[index].registrar,
-    categoryId: domainData.categoryId !== undefined ? domainData.categoryId : domains[index].categoryId, // 添加分类ID处理
     customNote: domainData.customNote !== undefined ? domainData.customNote : domains[index].customNote, // 正确处理空字符串
     noteColor: domainData.noteColor !== undefined ? domainData.noteColor : domains[index].noteColor, // 添加备注颜色处理
     renewLink: domainData.renewLink !== undefined ? domainData.renewLink : domains[index].renewLink, // 正确处理空字符串
@@ -5333,184 +3911,6 @@ async function getTelegramConfigWithToken() {
   };
 }
 
-// ================================
-// 通知功能区域
-// ================================
-// 分类管理函数区域
-// ================================
-
-// 获取所有分类
-async function getCategories() {
-  const categoriesStr = await DOMAIN_MONITOR.get('categories') || '[]';
-  let categories = JSON.parse(categoriesStr);
-  
-  // 确保默认分类存在且在最前面
-  const defaultCategory = {
-    id: 'default',
-    name: '默认分类',
-    description: '未指定分类的域名',
-    order: 0,
-    isDefault: true
-  };
-  
-  // 检查是否已存在默认分类
-  const hasDefault = categories.some(cat => cat.id === 'default');
-  if (!hasDefault) {
-    categories.unshift(defaultCategory);
-  } else {
-    // 确保默认分类的属性正确
-    const defaultIndex = categories.findIndex(cat => cat.id === 'default');
-    categories[defaultIndex] = { ...categories[defaultIndex], ...defaultCategory };
-  }
-  
-  // 按order排序
-  categories.sort((a, b) => a.order - b.order);
-  
-  return categories;
-}
-
-// 添加新分类
-async function addCategory(categoryData) {
-  const { name, description } = categoryData;
-  
-  if (!name || name.trim() === '') {
-    throw new Error('分类名称不能为空');
-  }
-  
-  const categories = await getCategories();
-  
-  // 检查分类名是否已存在
-  if (categories.some(cat => cat.name === name.trim())) {
-    throw new Error('分类名称已存在');
-  }
-  
-  // 生成新ID
-  const id = 'cat_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-  
-  // 计算新的order值（最大值+1）
-  const maxOrder = Math.max(...categories.map(cat => cat.order));
-  
-  const newCategory = {
-    id,
-    name: name.trim(),
-    description: description?.trim() || '',
-    order: maxOrder + 1,
-    isDefault: false,
-    createdAt: new Date().toISOString()
-  };
-  
-  categories.push(newCategory);
-  await DOMAIN_MONITOR.put('categories', JSON.stringify(categories));
-  
-  return newCategory;
-}
-
-// 更新分类
-async function updateCategory(id, categoryData) {
-  const { name, description } = categoryData;
-  
-  if (id === 'default') {
-    throw new Error('不能编辑默认分类');
-  }
-  
-  if (!name || name.trim() === '') {
-    throw new Error('分类名称不能为空');
-  }
-  
-  const categories = await getCategories();
-  const categoryIndex = categories.findIndex(cat => cat.id === id);
-  
-  if (categoryIndex === -1) {
-    throw new Error('分类不存在');
-  }
-  
-  // 检查分类名是否与其他分类重复
-  const existingCategory = categories.find(cat => cat.name === name.trim() && cat.id !== id);
-  if (existingCategory) {
-    throw new Error('分类名称已存在');
-  }
-  
-  // 更新分类信息
-  categories[categoryIndex] = {
-    ...categories[categoryIndex],
-    name: name.trim(),
-    description: description?.trim() || '',
-    updatedAt: new Date().toISOString()
-  };
-  
-  await DOMAIN_MONITOR.put('categories', JSON.stringify(categories));
-  
-  return categories[categoryIndex];
-}
-
-// 删除分类
-async function deleteCategory(id) {
-  if (id === 'default') {
-    throw new Error('不能删除默认分类');
-  }
-  
-  const categories = await getCategories();
-  const categoryIndex = categories.findIndex(cat => cat.id === id);
-  
-  if (categoryIndex === -1) {
-    throw new Error('分类不存在');
-  }
-  
-  // 检查该分类下是否有域名
-  const domains = await getDomains();
-  const domainsInCategory = domains.filter(domain => domain.categoryId === id);
-  
-  if (domainsInCategory.length > 0) {
-    // 将该分类下的域名移动到默认分类
-    for (const domain of domainsInCategory) {
-      domain.categoryId = 'default';
-    }
-    await DOMAIN_MONITOR.put('domains', JSON.stringify(domains));
-  }
-  
-  // 删除分类
-  categories.splice(categoryIndex, 1);
-  await DOMAIN_MONITOR.put('categories', JSON.stringify(categories));
-  
-  return true;
-}
-
-// 移动分类顺序
-async function moveCategoryOrder(id, direction) {
-  if (id === 'default') {
-    throw new Error('不能移动默认分类');
-  }
-  
-  const categories = await getCategories();
-  const categoryIndex = categories.findIndex(cat => cat.id === id);
-  
-  if (categoryIndex === -1) {
-    throw new Error('分类不存在');
-  }
-  
-  // 筛选出非默认分类进行排序操作
-  const nonDefaultCategories = categories.filter(cat => !cat.isDefault);
-  const nonDefaultIndex = nonDefaultCategories.findIndex(cat => cat.id === id);
-  
-  if (direction === 'up' && nonDefaultIndex > 0) {
-    // 上移：与前一个交换order
-    const temp = nonDefaultCategories[nonDefaultIndex].order;
-    nonDefaultCategories[nonDefaultIndex].order = nonDefaultCategories[nonDefaultIndex - 1].order;
-    nonDefaultCategories[nonDefaultIndex - 1].order = temp;
-  } else if (direction === 'down' && nonDefaultIndex < nonDefaultCategories.length - 1) {
-    // 下移：与后一个交换order
-    const temp = nonDefaultCategories[nonDefaultIndex].order;
-    nonDefaultCategories[nonDefaultIndex].order = nonDefaultCategories[nonDefaultIndex + 1].order;
-    nonDefaultCategories[nonDefaultIndex + 1].order = temp;
-  }
-  
-  await DOMAIN_MONITOR.put('categories', JSON.stringify(categories));
-  
-  return true;
-}
-
-// ================================
-
 // 发送Telegram消息
 async function sendTelegramMessage(config, message) {
   // 优先使用配置中的值，如果没有则使用环境变量或代码中的值
@@ -5564,6 +3964,16 @@ async function sendTelegramMessage(config, message) {
   return await response.json();
 }
 
+// 返回JSON响应
+function jsonResponse(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    status,
+  });
+}
+
 // 设置定时任务，检查即将到期的域名并发送通知
 async function checkExpiringDomains() {
   const domains = await getDomains();
@@ -5612,10 +4022,17 @@ async function checkExpiringDomains() {
         ((telegramConfig.botToken || typeof TG_TOKEN !== 'undefined') && 
          (telegramConfig.chatId || typeof TG_ID !== 'undefined'))) {
       try {
-        // 发送合并的域名通知
-        await sendCombinedDomainsNotification(telegramConfig, expiringDomains, expiredDomains);
+        // 发送即将到期的域名通知
+        if (expiringDomains.length > 0) {
+          await sendExpiringDomainsNotification(telegramConfig, expiringDomains, false);
+        }
+        
+        // 发送已过期的域名通知
+        if (expiredDomains.length > 0) {
+          await sendExpiringDomainsNotification(telegramConfig, expiredDomains, true);
+        }
       } catch (error) {
-        // 静默处理Telegram通知发送失败
+        console.error('发送Telegram通知失败: ' + error.message);
       }
     }
   }
@@ -5651,7 +4068,7 @@ async function sendExpiringDomainsNotification(config, domains, isExpired) {
     
     message += '🌍 <b>域名:</b> ' + domain.name + '\n';
     if (domain.registrar) {
-      message += '🏬 <b>注册厂商:</b> ' + domain.registrar + '\n';
+      message += '🏬 <b>注册商:</b> ' + domain.registrar + '\n';
     }
     message += '⏳ <b>剩余时间:</b> ' + daysLeft + ' 天\n';
     message += '📅 <b>到期日期:</b> ' + formatDate(domain.expiryDate) + '\n';
@@ -5662,83 +4079,6 @@ async function sendExpiringDomainsNotification(config, domains, isExpired) {
       message += '⚠️ <b>点击续期:</b> 未设置续期链接\n';
     }
   });
-  
-  // 发送消息
-  return await sendTelegramMessage(config, message);
-}
-
-// 发送合并的域名通知（即将到期和已过期）
-async function sendCombinedDomainsNotification(config, expiringDomains, expiredDomains) {
-  if (expiringDomains.length === 0 && expiredDomains.length === 0) return;
-  
-  let message = '';
-  
-  // 处理即将到期的域名
-  if (expiringDomains.length > 0) {
-    const title = '🚨 <b>域名到期提醒</b> 🚨';
-    const separator = '===================';
-    
-    message += title + '\n' + separator + '\n\n';
-    
-    expiringDomains.forEach((domain, index) => {
-      const expiryDate = new Date(domain.expiryDate);
-      const today = new Date();
-      const daysLeft = Math.ceil((expiryDate - today) / (1000 * 60 * 60 * 24));
-      
-      if (index > 0) {
-        message += '\n';
-      }
-      
-      message += '🌍 域名: ' + domain.name + '\n';
-      if (domain.registrar) {
-        message += '🏬 注册厂商: ' + domain.registrar + '\n';
-      }
-      message += '⏳ 剩余时间: ' + daysLeft + ' 天\n';
-      message += '📅 到期日期: ' + formatDate(domain.expiryDate) + '\n';
-      
-      if (domain.renewLink) {
-        message += '⚠️ 点击续期: ' + domain.renewLink + '\n';
-      } else {
-        message += '⚠️ 点击续期: 未设置续期链接\n';
-      }
-    });
-  }
-  
-  // 如果两种类型的域名都存在，添加分隔线
-  if (expiringDomains.length > 0 && expiredDomains.length > 0) {
-    message += '\n━━━━━━━━━━━━━━━━\n\n';
-  }
-  
-  // 处理已过期的域名
-  if (expiredDomains.length > 0) {
-    const title = '🚫 <b>域名已过期提醒</b> 🚫';
-    const separator = '=====================';
-    
-    message += title + '\n' + separator + '\n\n';
-    
-    expiredDomains.forEach((domain, index) => {
-      const expiryDate = new Date(domain.expiryDate);
-      const today = new Date();
-      const daysLeft = Math.ceil((expiryDate - today) / (1000 * 60 * 60 * 24));
-      
-      if (index > 0) {
-        message += '\n';
-      }
-      
-      message += '🌍 域名: ' + domain.name + '\n';
-      if (domain.registrar) {
-        message += '🏬 注册厂商: ' + domain.registrar + '\n';
-      }
-      message += '⏳ 剩余时间: ' + daysLeft + ' 天\n';
-      message += '📅 到期日期: ' + formatDate(domain.expiryDate) + '\n';
-      
-      if (domain.renewLink) {
-        message += '⚠️ 点击续期: ' + domain.renewLink + '\n';
-      } else {
-        message += '⚠️ 点击续期: 未设置续期链接\n';
-      }
-    });
-  }
   
   // 发送消息
   return await sendTelegramMessage(config, message);
@@ -5783,14 +4123,15 @@ async function testSingleDomainNotification(id) {
   // 域名到期测试通知使用23个字符，域名已过期测试通知使用25个字符
   const separator = isExpired ? 
     '=========================' : 
-        '=======================';
+    '=======================';
+  
   
   let message = title + '\n' + separator + '\n\n';
   message += '这是一条测试通知，用于预览域名' + (isExpired ? '已过期' : '到期') + '提醒的格式：\n\n';
 
   message += '🌍 <b>域名:</b> ' + domain.name + '\n';
   if (domain.registrar) {
-    message += '🏬 <b>注册厂商:</b> ' + domain.registrar + '\n';
+    message += '🏬 <b>注册商:</b> ' + domain.registrar + '\n';
   }
   message += '⏳ <b>剩余时间:</b> ' + daysLeft + ' 天\n';
   message += '📅 <b>到期日期:</b> ' + formatDate(domain.expiryDate) + '\n';
@@ -5806,11 +4147,16 @@ async function testSingleDomainNotification(id) {
   return { success: true, message: '测试通知已发送' };
 }
 
-// ================================
-// Cloudflare Workers事件处理
-// ================================
+// 格式化日期函数
+function formatDate(dateString) {
+  const date = new Date(dateString);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return year + '-' + month + '-' + day;
+}
 
-// 注册fetch事件处理程序
+// 注册Cloudflare Workers事件处理程序
 addEventListener('fetch', event => {
   event.respondWith(handleRequest(event.request));
 });
@@ -5819,10 +4165,6 @@ addEventListener('fetch', event => {
 addEventListener('scheduled', event => {
   event.waitUntil(checkExpiringDomains());
 });
-
-// ================================
-// 辅助函数区域
-// ================================
 
 // 添加页面底部版权信息
 function addCopyrightFooter(html) {
@@ -5833,9 +4175,9 @@ function addCopyrightFooter(html) {
   const footerIconSize = '14px';
   // 页脚图标颜色（使用CSS颜色值，如：#4e54c8、blue、rgba(0,0,0,0.7)等）
   const footerIconColor = 'white';
-  
-  const footerContent = `<span style="color: white;">Copyright © 2025 Faiz</span> &nbsp;|&nbsp; <i class="iconfont icon-github" style="font-size: ${footerIconSize}; color: ${footerIconColor};"></i><a href="https://github.com/kamanfaiz/CF-Domain-Autocheck" target="_blank" style="color: white; text-decoration: none;">GitHub Repository</a> &nbsp;|&nbsp; <i class="iconfont icon-book" style="font-size: ${footerIconSize}; color: ${footerIconColor};"></i><a href="https://blog.faiz.hidns.co/" target="_blank" style="color: white; text-decoration: none;">Faiz博客</a>`;
-  
+
+  const footerContent = ``;
+
   const bodyEndIndex = html.lastIndexOf('</body>');
   
   // 如果找到了</body>标签
@@ -5866,39 +4208,6 @@ function addCopyrightFooter(html) {
           -webkit-backdrop-filter: blur(5px);
           color: white;
           text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        }
-        
-        /* 移动端页脚响应式缩放 */
-        @media (max-width: 768px) {
-          #copyright-footer {
-            font-size: 12px;
-            padding: 8px 5px;
-          }
-        }
-        
-        @media (max-width: 480px) {
-          #copyright-footer {
-            font-size: 10px;
-            padding: 6px 3px;
-          }
-          
-          #copyright-footer .iconfont {
-            font-size: 10px !important;
-          }
-        }
-        
-        @media (max-width: 320px) {
-          #copyright-footer {
-            font-size: 9px;
-            padding: 5px 2px;
-          }
-          
-          #copyright-footer .iconfont {
-            font-size: 9px !important;
-          }
         }
       </style>
       
@@ -5934,7 +4243,7 @@ function addCopyrightFooter(html) {
   
   // 如果没找到</body>标签，就直接添加到HTML末尾
   const footerHtml = `
-    <div style="text-align: center; padding: 10px; font-size: ${footerFontSize}; margin-top: 20px; border-top: 1px solid rgba(255, 255, 255, 0.18); background-color: rgba(0, 0, 0, 0.2); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); color: white; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+    <div style="text-align: center; padding: 10px; font-size: ${footerFontSize}; margin-top: 20px; border-top: 1px solid rgba(255, 255, 255, 0.18); background-color: rgba(0, 0, 0, 0.2); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); color: white; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);">
       ${footerContent}
     </div>
   `;
@@ -5962,388 +4271,196 @@ async function addFooterToResponse(response) {
   return response;
 }
 
+// 添加Pages兼容性支持
+export default {
+  async fetch(request, env, ctx) {
+    // 在Pages环境中，env包含绑定的变量
+    if (env) {
+      // 将环境变量绑定到全局，以便与Workers代码兼容
+      if (env.DOMAIN_MONITOR) {
+        globalThis.DOMAIN_MONITOR = env.DOMAIN_MONITOR;
+      }
+      if (env.TOKEN) {
+        globalThis.TOKEN = env.TOKEN;
+      }
+      if (env.LOGO_URL) {
+        globalThis.LOGO_URL = env.LOGO_URL;
+      }
+      if (env.BACKGROUND_URL) {
+        globalThis.BACKGROUND_URL = env.BACKGROUND_URL;
+      }
+      if (env.MOBILE_BACKGROUND_URL) {
+        globalThis.MOBILE_BACKGROUND_URL = env.MOBILE_BACKGROUND_URL;
+      }
+      if (env.SITE_NAME) {
+        globalThis.SITE_NAME = env.SITE_NAME;
+      }
+      if (env.TG_TOKEN) {
+        globalThis.TG_TOKEN = env.TG_TOKEN;
+      }
+      if (env.TG_ID) {
+        globalThis.TG_ID = env.TG_ID;
+      }
+    }
+    
+    // 使用相同的请求处理函数
+    return handleRequest(request);
+  },
+  
+  async scheduled(event, env, ctx) {
+    // 在Pages环境中，env包含绑定的变量
+    if (env) {
+      // 将环境变量绑定到全局，以便与Workers代码兼容
+      if (env.DOMAIN_MONITOR) {
+        globalThis.DOMAIN_MONITOR = env.DOMAIN_MONITOR;
+      }
+      if (env.TG_TOKEN) {
+        globalThis.TG_TOKEN = env.TG_TOKEN;
+      }
+      if (env.TG_ID) {
+        globalThis.TG_ID = env.TG_ID;
+      }
+    }
+    
+    // 使用相同的定时任务处理函数
+    return checkExpiringDomains();
+  }
+};
+
+// 检查是否已配置KV
+function isKVConfigured() {
+  return typeof DOMAIN_MONITOR !== 'undefined';
+}
 
 // 获取配置向导HTML
 function getSetupHTML() {
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>域名监控系统 - 初始化配置</title>
-    <link rel="icon" type="image/svg+xml" href="${DEFAULT_LOGO}">
-    <link rel="stylesheet" href="${ICONFONT_CSS}">
-    <script src="${ICONFONT_JS}"></script>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #333;
-            line-height: 1.6;
-        }
-        
-        .setup-container {
-            background: white;
-            border-radius: 16px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
-            padding: 40px;
-            max-width: 800px;
-            width: 90%;
-            margin: 20px;
-        }
-        
-        .setup-header {
-            text-align: center;
-            margin-bottom: 40px;
-        }
-        
-        .setup-header .iconfont {
-            font-size: 64px;
-            color: #272830;
-            margin-bottom: 16px;
-            display: block;
-        }
-        
-        .setup-header h1 {
-            color: #2c3e50;
-            font-size: 28px;
-            margin-bottom: 8px;
-        }
-        
-        .setup-header p {
-            color: #7f8c8d;
-            font-size: 16px;
-        }
-        
-        .step {
-            margin-bottom: 30px;
-            padding: 24px;
-            border: 1px solid #e1e8ed;
-            border-radius: 12px;
-            background: #f8fafc;
-        }
-        
-        .step-title {
-            display: flex;
-            align-items: center;
-            font-size: 18px;
-            font-weight: 600;
-            color: #2c3e50;
-            margin-bottom: 16px;
-        }
-        
-        .step-number {
-            background: #667eea;
-            color: white;
-            width: 28px;
-            height: 28px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 14px;
-            font-weight: bold;
-            margin-right: 12px;
-        }
-        
-        .step-content {
-            color: #555;
-            line-height: 1.7;
-        }
-        
-        .code-block {
-            background: #2c3e50;
-            color: #ecf0f1;
-            padding: 16px;
-            border-radius: 8px;
-            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-            font-size: 14px;
-            margin: 12px 0;
-            overflow-x: auto;
-        }
-        
-        .config-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin: 16px 0;
-        }
-        
-        .config-table th,
-        .config-table td {
-            padding: 12px;
-            text-align: left;
-            border-bottom: 1px solid #e1e8ed;
-        }
-        
-        .config-table th {
-            background: #f1f3f4;
-            font-weight: 600;
-            color: #2c3e50;
-        }
-        
-        .config-table code {
-            background: #f1f3f4;
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-            font-size: 13px;
-        }
-        
-        .check-button {
-            width: 100%;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            padding: 16px 24px;
-            border-radius: 12px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            margin-top: 30px;
-            text-decoration: none;
-            display: inline-block;
-            text-align: center;
-        }
-        
-        .check-button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
-            color: white;
-            text-decoration: none;
-        }
-        
-        .check-button:active {
-            transform: translateY(0);
-        }
-        
-        .check-button:disabled {
-            background: #bdc3c7;
-            cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
-        }
-        
-        .status-message {
-            margin-top: 20px;
-            padding: 16px;
-            border-radius: 8px;
-            font-weight: 500;
-            display: none;
-        }
-        
-        .status-success {
-            background: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
-        
-        .status-error {
-            background: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-        
-        .status-loading {
-            background: #d1ecf1;
-            color: #0c5460;
-            border: 1px solid #bee5eb;
-        }
-        
-        .loading-spinner {
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>域名监控系统 - 配置向导</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+      background-color: #f8f9fa;
+      padding: 20px;
+    }
+    .setup-container {
+      max-width: 800px;
+      margin: 0 auto;
+      background-color: white;
+      border-radius: 10px;
+      padding: 20px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    .step {
+      margin-bottom: 20px;
+      padding: 15px;
+      border-left: 4px solid #4e54c8;
+      background-color: #f8f9fa;
+    }
+    .step-number {
       display: inline-block;
-            width: 16px;
-            height: 16px;
-            border: 2px solid #ffffff;
+      width: 30px;
+      height: 30px;
+      background-color: #4e54c8;
+      color: white;
+      text-align: center;
+      line-height: 30px;
       border-radius: 50%;
-            border-top-color: transparent;
-            animation: spin 1s ease-in-out infinite;
-            margin-right: 8px;
-        }
-        
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-        
-        .iconfont {
-            font-size: 20px;
-            margin-right: 8px;
-        }
-        
-        @media (max-width: 768px) {
-            .setup-container {
-                padding: 24px;
-                margin: 10px;
-            }
-            
-            .setup-header h1 {
-                font-size: 24px;
-            }
-            
-            .code-block {
-                font-size: 12px;
-                padding: 12px;
-            }
+      margin-right: 10px;
+    }
+    code {
+      background-color: #f1f1f1;
+      padding: 2px 5px;
+      border-radius: 3px;
+    }
+    img {
+      max-width: 100%;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      margin: 10px 0;
+    }
+    .alert {
+      margin-top: 20px;
+    }
+    .btn-primary {
+      background-color: #4e54c8;
+      border-color: #4e54c8;
+    }
+    .btn-primary:hover {
+      background-color: #3f44ae;
+      border-color: #3f44ae;
     }
   </style>
 </head>
 <body>
   <div class="setup-container">
-        <div class="setup-header">
-            <i class="iconfont icon-jiankong-zichanjiankong"></i>
-            <h1>欢迎使用域名到期监控系统</h1>
-            <p>首次使用需要进行简单配置，请按照以下步骤完成初始化</p>
+    <h1 class="mb-4">域名监控系统 - 配置向导</h1>
+    
+    <div class="alert alert-warning">
+      <strong>提示：</strong> 检测到您尚未完成必要的配置。请按照以下步骤设置您的域名监控系统。
     </div>
     
     <div class="step">
-            <div class="step-title">
-                <span class="step-number">1</span>
-                <i class="iconfont icon-database"></i>
-                绑定 KV 存储空间 (必需)
-            </div>
-            <div class="step-content">
-                <p>在 Cloudflare Workers 控制台中为您的 Worker 绑定 KV 存储空间：</p>
-                <ol style="margin: 12px 0 12px 20px;">
-                    <li>进入 Cloudflare 控制台 → Workers & Pages</li>
-                    <li>找到您的 Worker 项目，点击进入</li>
-                    <li>转到 "设置" → "变量"</li>
-                    <li>在 "KV 命名空间绑定" 部分点击 "添加绑定"</li>
-                    <li>变量名称填写：<code>DOMAIN_MONITOR</code></li>
-                    <li>选择或创建一个 KV 命名空间</li>
-                    <li>点击 "保存并部署"</li>
+      <h3><span class="step-number">1</span> 创建KV命名空间</h3>
+      <p>首先，您需要创建一个KV命名空间来存储域名数据：</p>
+      <ol>
+        <li>登录到 <a href="https://dash.cloudflare.com/" target="_blank">Cloudflare仪表板</a></li>
+        <li>选择您的账户，然后点击<strong>Workers & Pages</strong></li>
+        <li>在左侧菜单中，点击<strong>KV</strong></li>
+        <li>点击<strong>创建命名空间</strong>按钮</li>
+        <li>输入命名空间名称，例如：<code>domain-monitor</code></li>
+        <li>点击<strong>添加</strong>按钮完成创建</li>
       </ol>
-            </div>
     </div>
     
     <div class="step">
-            <div class="step-title">
-                <span class="step-number">2</span>
-                <i class="iconfont icon-setting"></i>
-                配置环境变量 (可选)
-            </div>
-            <div class="step-content">
-                <p>根据需要在 "设置" → "变量" → "环境变量" 中添加以下配置：</p>
-                <table class="config-table">
-                    <thead>
-                        <tr>
-                            <th>变量名</th>
-                            <th>说明</th>
-                            <th>示例</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td><code>TOKEN</code></td>
-                            <td>登录密码（留空则使用默认密码 "domain"）</td>
-                            <td>your_password</td>
-                        </tr>
-                        <tr>
-                            <td><code>SITE_NAME</code></td>
-                            <td>网站标题</td>
-                            <td>我的域名监控</td>
-                        </tr>
-                        <tr>
-                            <td><code>LOGO_URL</code></td>
-                            <td>自定义 Logo 图片 URL</td>
-                            <td>https://example.com/logo.png</td>
-                        </tr>
-                        <tr>
-                            <td><code>BACKGROUND_URL</code></td>
-                            <td>自定义背景图片 URL</td>
-                            <td>https://example.com/bg.jpg</td>
-                        </tr>
-                        <tr>
-                            <td><code>TG_TOKEN</code></td>
-                            <td>Telegram Bot Token（用于到期通知）</td>
-                            <td>1234567890:ABC...</td>
-                        </tr>
-                        <tr>
-                            <td><code>TG_ID</code></td>
-                            <td>Telegram Chat ID</td>
-                            <td>123456789</td>
-                        </tr>
-                        <tr>
-                            <td><code>WHOISJSON_API_KEY</code></td>
-                            <td>WhoisJSON API 密钥（用于域名查询）</td>
-                            <td>your_api_key</td>
-                        </tr>
-                    </tbody>
-                </table>
-                <p><strong>注意：</strong>环境变量配置后需要重新部署 Worker 才能生效。</p>
-            </div>
-        </div>
-        
-        <button class="check-button" onclick="checkConfiguration()">
-            <i class="iconfont icon-check"></i>
-            检测配置并进入系统
-        </button>
-        
-        <div id="statusMessage" class="status-message"></div>
+      <h3><span class="step-number">2</span> 绑定KV命名空间到您的项目</h3>
+      <p>接下来，您需要将创建的KV命名空间绑定到您的Workers或Pages项目：</p>
+      
+      <h4>对于Workers项目：</h4>
+      <ol>
+        <li>在Workers & Pages页面，点击您的Workers项目</li>
+        <li>点击<strong>设置</strong>标签，然后选择<strong>变量</strong></li>
+        <li>在<strong>KV命名空间绑定</strong>部分，点击<strong>添加绑定</strong></li>
+        <li>变量名设置为：<code>DOMAIN_MONITOR</code>（必须使用此名称）</li>
+        <li>KV命名空间选择您刚才创建的命名空间</li>
+        <li>点击<strong>保存</strong>按钮</li>
+      </ol>
+      
+      <h4>对于Pages项目：</h4>
+      <ol>
+        <li>在Workers & Pages页面，点击您的Pages项目</li>
+        <li>点击<strong>设置</strong>标签，然后选择<strong>函数</strong></li>
+        <li>在<strong>KV命名空间绑定</strong>部分，点击<strong>添加绑定</strong></li>
+        <li>变量名设置为：<code>DOMAIN_MONITOR</code>（必须使用此名称）</li>
+        <li>KV命名空间选择您刚才创建的命名空间</li>
+        <li>点击<strong>保存</strong>按钮</li>
+      </ol>
     </div>
     
-    <script>
-        async function checkConfiguration() {
-            const button = document.querySelector('.check-button');
-            const statusDiv = document.getElementById('statusMessage');
-            
-            // 设置加载状态
-            button.disabled = true;
-            button.innerHTML = '<span class="loading-spinner"></span>检测配置中...';
-            
-            statusDiv.className = 'status-message status-loading';
-            statusDiv.style.display = 'block';
-            statusDiv.textContent = '正在检测配置状态...';
-            
-            try {
-                const response = await fetch('/api/check-setup');
-                const result = await response.json();
-                
-                if (result.success) {
-                    statusDiv.className = 'status-message status-success';
-                    statusDiv.innerHTML = '<i class="iconfont icon-check"></i>' + result.message + '，即将跳转...';
-                    
-                    // 根据配置状态决定跳转目标
-                    setTimeout(() => {
-                        if (result.nextStep === 'dashboard') {
-                            window.location.href = '/dashboard';
-                        } else if (result.nextStep === 'login') {
-                            window.location.href = '/';
-                        } else {
-                            window.location.href = '/';
-                        }
-                    }, 1500);
-                } else {
-                    statusDiv.className = 'status-message status-error';
-                    let errorMessage = '<i class="iconfont icon-close"></i>' + result.message;
-                    if (result.details) {
-                        errorMessage += '<br><small>详细信息: ' + result.details + '</small>';
-                    }
-                    statusDiv.innerHTML = errorMessage;
-                    
-                    // 重置按钮
-                    button.disabled = false;
-                    button.innerHTML = '<i class="iconfont icon-refresh"></i>重新检测';
-                }
-            } catch (error) {
-                statusDiv.className = 'status-message status-error';
-                statusDiv.innerHTML = '<i class="iconfont icon-close"></i>检测失败: ' + error.message;
-                
-                // 重置按钮
-                button.disabled = false;
-                button.innerHTML = '<i class="iconfont icon-refresh"></i>重新检测';
-            }
-        }
-    </script>
+    <div class="step">
+      <h3><span class="step-number">3</span> 设置环境变量（可选）</h3>
+      <p>您可以设置以下环境变量来自定义您的域名监控系统：</p>
+      <ul>
+        <li><code>TOKEN</code> - 登录密码，如果不设置则默认使用"domain"</li>
+        <li><code>SITE_NAME</code> - 网站标题</li>
+        <li><code>LOGO_URL</code> - 自定义Logo图片URL</li>
+        <li><code>BACKGROUND_URL</code> - 自定义桌面端背景图片URL</li>
+        <li><code>MOBILE_BACKGROUND_URL</code> - 自定义移动端背景图片URL（可选，如果不设置则使用桌面端背景图片）</li>
+        <li><code>TG_TOKEN</code> - Telegram机器人Token</li>
+        <li><code>TG_ID</code> - Telegram聊天ID</li>
+      </ul>
+      <p>在Workers或Pages的<strong>设置 > 变量</strong>部分添加这些环境变量。</p>
+    </div>
+    
+    <div class="text-center mt-4">
+      <a href="/setup-complete" class="btn btn-primary btn-lg">我已完成设置，刷新页面</a>
+    </div>
+  </div>
 </body>
 </html>`;
 }
