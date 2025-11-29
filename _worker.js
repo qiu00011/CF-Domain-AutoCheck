@@ -7,7 +7,7 @@ const ICONFONT_JS = '//at.alicdn.com/t/c/font_4973034_ehjc2dhuu76.js';
 
 // 网站图标和背景图片，可在环境变量中设置
 const DEFAULT_LOGO = 'https://image.hyeri.us.kg/icon.png'; // 默认Logo图片，外置变量名为LOGO_URL
-const DEFAULT_BACKGROUND = 'https://image.hyeri.us.kg/bg2.jpg'; // 默认背景图片，外置变量名为BACKGROUND_URL
+const DEFAULT_BACKGROUND = 'https://image.hyeri.us.kg/bg6.jpg'; // 默认背景图片，外置变量名为BACKGROUND_URL
 const DEFAULT_MOBILE_BACKGROUND = 'https://image.hyeri.us.kg/bg1.jpg'; // 默认手机端背景图片，留空则使用桌面端背景图片，外置变量名为MOBILE_BACKGROUND_URL
 
 // 登录密码设置
